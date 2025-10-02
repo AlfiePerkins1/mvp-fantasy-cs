@@ -23,7 +23,7 @@ class Scoring(commands.Cog):
             "death": -0.5,
             "entry_kill": 2.0,
             "win_bonus_per_5": 10,
-            "role_multipliers": {"star": 2.0, "entry": 2.0, "awper": 2.0, "support": 1.2, "igl": 1.1},
+            "role_multipliers": {"star": 1.5, "entry": 2.0, "awper": 2.0, "support": 1.2, "igl": 1.1},
         }
         embed = discord.Embed(title="Fantasy Scoring")
         for k, v in config.items():

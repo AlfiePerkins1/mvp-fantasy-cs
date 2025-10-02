@@ -1,13 +1,16 @@
 # backend/models/__init__.py
-from sqlalchemy import String, Integer, ForeignKey, UniqueConstraint, Float, BigInteger
+from sqlalchemy import String, Integer, ForeignKey, UniqueConstraint, Float, BigInteger, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from ..db import Base
+from datetime import datetime, timezone
+
 
 class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     discord_id: Mapped[int] = mapped_column(unique=True, index=True)
     teams: Mapped[list["Team"]] = relationship(back_populates="owner")
+    steam_id: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
 
 class Player(Base):
     __tablename__ = "players"
@@ -24,9 +27,10 @@ class Team(Base):
     name: Mapped[str] = mapped_column(String(64))
     owner: Mapped["User"] = relationship(back_populates="teams")
     players: Mapped[list["TeamPlayer"]] = relationship(back_populates="team", cascade="all, delete-orphan")
-
-    __table_args__ = (UniqueConstraint("owner_id", "name", name="uq_owner_teamname"),)
-
+    guild_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    __table_args__ = (UniqueConstraint("owner_id", "guild_id", name="uq_owner_per_guild"),  # <= one team per user per server
+                      UniqueConstraint("guild_id", "name", name="uq_teamname_per_guild"),   # <= Prevent duplicate teamnames
+                      )
 class TeamPlayer(Base):
     __tablename__ = "team_players"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -52,3 +56,30 @@ class ScoringConfig(Base):
     awper: Mapped[float] = mapped_column(Float, default=2.0)
     support: Mapped[float] = mapped_column(Float, default=1.2)
     igl: Mapped[float] = mapped_column(Float, default=1.1)
+
+class PlayerStats(Base):
+    __tablename__ = "player_stats"
+
+    # Prim key
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+
+    # Link to the user (who owns the steam account)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+
+    #Per guild cache
+    guild_id: Mapped[int] = mapped_column(BigInteger, index=True)
+
+    # Cached Aggregates
+    avg_leetify_rating: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sample_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    trade_kills: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ct_rating: Mapped[float | None] = mapped_column(Float, nullable=True)
+    t_rating: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "guild_id", name="uq_stats_user_guild"),
+    )
+
+
