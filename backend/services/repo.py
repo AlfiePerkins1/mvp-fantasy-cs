@@ -1,7 +1,10 @@
 # backend/services/repo.py
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import User, Team, Player, TeamPlayer, ScoringConfig, PlayerStats
+
+from typing import Tuple, Optional
+
 
 from backend.services.leetify_api import current_week_start_london
 from datetime import datetime, timedelta, timezone
@@ -23,6 +26,57 @@ async def get_or_create_user(session: AsyncSession, discord_id: int) -> User:
         session.add(user)
         await session.flush()
     return user
+
+async def remove_user_steam_id(
+    session: AsyncSession, discord_id: int, *, purge_stats: bool = False, guild_id: Optional[int] = None) -> Tuple[User, Optional[str]]:
+    user = await get_or_create_user(session, discord_id)
+    old = user.steam_id
+    user.steam_id = None
+    await session.flush()
+
+    # Remove from teams (handle stored as the discord_id string)
+    # Find Player rows that represent this Discord user
+    player_ids = (await session.scalars(
+        select(Player.id).where(Player.handle == str(discord_id))
+    )).all()
+
+    if player_ids:
+        if guild_id is not None:
+            # Find TeamPlayer rows for those players within this guild
+            tp_ids = (await session.scalars(
+                select(TeamPlayer.id)
+                .join(Team, Team.id == TeamPlayer.team_id)
+                .where(
+                    Team.guild_id == guild_id,
+                    TeamPlayer.player_id.in_(player_ids),
+                )
+            )).all()
+        else:
+            # All guilds
+            tp_ids = (await session.scalars(
+                select(TeamPlayer.id).where(TeamPlayer.player_id.in_(player_ids))
+            )).all()
+
+        if tp_ids:
+            await session.execute(delete(TeamPlayer).where(TeamPlayer.id.in_(tp_ids)))
+            await session.flush()
+
+    # Optionally purge cached stats
+    if purge_stats:
+        if guild_id is not None:
+            await session.execute(
+                delete(PlayerStats).where(
+                    PlayerStats.user_id == user.id,
+                    PlayerStats.guild_id == guild_id,
+                )
+            )
+        else:
+            await session.execute(
+                delete(PlayerStats).where(PlayerStats.user_id == user.id)
+            )
+        await session.flush()
+
+    return user, old
 
 async def create_team(session: AsyncSession, owner: User, name: str, guild_id: int) -> Team:
     team = Team(owner_id=owner.id, name=name, guild_id=guild_id)
@@ -69,6 +123,7 @@ async def set_user_steam_id(session: AsyncSession, discord_id: int, steam_id: st
     user.steam_id = steam_id
     await session.flush()
     return user
+
 
 async def ensure_player_for_user(session: AsyncSession, user: User) -> Player:
     res = await session.execute(select(Player).where(Player.faceit_id == None, Player.handle == str(user.discord_id)))
@@ -118,11 +173,25 @@ async def upsert_stats(
         trade_kills: int | None,
         ct_rating: float | None,
         t_rating: float | None,
+        adr: float | None,
+        entries: float | None,
+        flashes: float | None,
+        util_dmg: float | None,
+        faceit_games: int | None,
+        premier_games: int | None,
+        renown_games: int | None,
+        mm_games: int | None,
+        other_games: int | None,
+        wins: int | None,
 ) -> PlayerStats:
 
     """
     Inserts or updates PlayerStats for a given user in a guild
     """
+
+    print(f'Util {util_dmg}')
+    print(f'Entries {entries}')
+    print(f'Flashes {flashes}')
 
     row = await get_cached_stats(session, user_id, guild_id)
     now = datetime.now(timezone.utc)
@@ -132,6 +201,20 @@ async def upsert_stats(
         row.trade_kills = trade_kills
         row.ct_rating = ct_rating
         row.t_rating = t_rating
+        row.adr = adr
+        row.entries = entries
+        row.flashes = flashes
+        row.util_dmg = util_dmg
+        row.faceit_games = faceit_games
+        row.premier_games = premier_games
+        row.renown_games = renown_games
+        row.mm_games = mm_games
+        row.other_games = other_games
+        row.wins = wins
+
+
+
+
         row.fetched_at = now
         await session.flush()
         return row
@@ -144,7 +227,17 @@ async def upsert_stats(
         trade_kills=trade_kills,
         ct_rating=ct_rating,
         t_rating=t_rating,
-        fetched_at=now,
+        adr=adr,
+        entries=entries,
+        flashes=flashes,
+        util_dmg=util_dmg,
+        faceit_games=faceit_games,
+        premier_games=premier_games,
+        renown_games=renown_games,
+        mm_games=mm_games,
+        other_games=other_games,
+        wins=wins,
+        fetched_at=now
     )
     session.add(row)
     await session.flush()

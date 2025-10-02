@@ -75,6 +75,22 @@ class PlayerStats(Base):
     trade_kills: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ct_rating: Mapped[float | None] = mapped_column(Float, nullable=True)
     t_rating: Mapped[float | None] = mapped_column(Float, nullable=True)
+    adr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    entries: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    flashes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    util_dmg: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    faceit_games: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    premier_games: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    renown_games: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mm_games: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    other_games: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    wins: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    weekly_base_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    weekly_avg_mult: Mapped[float | None] = mapped_column(Float, nullable=True)
+    weekly_score: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
