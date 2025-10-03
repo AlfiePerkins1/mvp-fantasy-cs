@@ -3,6 +3,19 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from typing import Optional
+from backend.services.leetify_api import current_week_start_london
+
+from backend.db import SessionLocal
+
+from discord.utils import escape_mentions
+from sqlalchemy import select, func, delete, insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+from datetime import datetime, timezone, timedelta
+
+from backend.services.repo import get_or_create_user
+from backend.services.scoring import make_breakdown
+from backend.models import User, Team, Player, TeamPlayer, ScoringConfig, PlayerStats, WeeklyPoints
 
 class Scoring(commands.Cog):
     """Scoring config & queries: view, set weights/multipliers, preview points."""
@@ -74,6 +87,70 @@ class Scoring(commands.Cog):
         await interaction.response.send_message(
             f"📈 Preview for **{player}**: **{base:.1f}** points (placeholder).", ephemeral=True
         )
+
+    @scoring.command(name="snapshot", description="(Admin) Recompute weekly points for this server or a specific member")
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.describe(member="Recompute only for this member (optional)")
+    async def snapshot(self, interaction: discord.Interaction, member: Optional[discord.User] = None):
+        if not interaction.guild_id:
+            await interaction.response.send_message("Run this in a server.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        guild_id = interaction.guild_id
+        week_start = current_week_start_london().date()
+        ruleset_id = 1  # swap to your active ruleset if you version rules
+
+        updated = 0
+        skipped = 0
+
+        async with SessionLocal() as session:
+            async with session.begin():
+                # scope which PlayerStats rows we’ll snapshot
+                q = select(PlayerStats).where(
+                    PlayerStats.guild_id == guild_id,
+                    PlayerStats.sample_size.isnot(None),
+                    PlayerStats.sample_size > 0,
+                )
+                if member is not None:
+                    # limit to one user
+                    db_user = await get_or_create_user(session, member.id)
+                    q = q.where(PlayerStats.user_id == db_user.id)
+
+                rows = (await session.scalars(q)).all()
+
+                for ps in rows:
+                    bd = make_breakdown(ps)
+
+                    # Build a single insert ... on conflict do update
+                    stmt = sqlite_insert(WeeklyPoints).values(
+                        week_start=week_start,
+                        guild_id=guild_id,
+                        user_id=ps.user_id,
+                        ruleset_id=ruleset_id,
+                        computed_at=datetime.now(timezone.utc),
+                        **bd,
+                    )
+                    update_cols = {k: getattr(stmt.excluded, k) for k in bd.keys()}
+                    update_cols["computed_at"] = datetime.now(timezone.utc)
+                    update_cols["ruleset_id"] = ruleset_id
+
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["week_start", "guild_id", "user_id"],
+                        set_=update_cols,
+                    )
+                    await session.execute(stmt)
+                    updated += 1
+
+        if updated == 0:
+            msg = "No PlayerStats with games found to snapshot."
+        else:
+            who = f" for **{escape_mentions(member.display_name)}**" if member else ""
+            msg = f"Recomputed **{updated}** weekly snapshot(s){who}."
+
+        await interaction.followup.send(msg, ephemeral=True)
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Scoring(bot))

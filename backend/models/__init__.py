@@ -98,4 +98,32 @@ class PlayerStats(Base):
         UniqueConstraint("user_id", "guild_id", name="uq_stats_user_guild"),
     )
 
+class WeeklyPoints(Base):
+    __tablename__ = "weekly_points"
+    week_start = mapped_column(DateTime, primary_key=True)
+    guild_id   = mapped_column(BigInteger, primary_key=True)
+    user_id    = mapped_column(Integer, primary_key=True)
 
+    ruleset_id  = mapped_column(Integer, nullable=False)
+    computed_at = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    sample_size   = mapped_column(Integer, default=0)
+    wins          = mapped_column(Integer, default=0)
+    faceit_games  = mapped_column(Integer, default=0)
+    premier_games = mapped_column(Integer, default=0)
+    renown_games  = mapped_column(Integer, default=0)
+    mm_games      = mapped_column(Integer, default=0)
+
+    pts_rating = mapped_column(Float, default=0.0)
+    pts_adr    = mapped_column(Float, default=0.0)
+    pts_trades = mapped_column(Float, default=0.0)
+    pts_entries= mapped_column(Float, default=0.0)
+    pts_flashes= mapped_column(Float, default=0.0)
+    pts_util   = mapped_column(Float, default=0.0)
+    base_avg   = mapped_column(Float, default=0.0)
+
+    avg_mult = mapped_column(Float, default=1.0)
+    wr_eff   = mapped_column(Float, default=0.5)
+    wr_mult  = mapped_column(Float, default=1.0)
+
+    weekly_score = mapped_column(Float, default=0.0)

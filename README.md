@@ -14,3 +14,10 @@ All stats are held in a local database which allows the seemless addition or rem
 
 Fun game to play within small and large discord servers. Small discord servers is currently the aim as its all discord based. However, in the future I'd like to expand to a web platform which makes it easier to search players and add them compared to discord embeds.
 
+# TODO
+
+Run weekly score command, either by whenever someone calls /show or /leaderboard (if its old) and whenever the week roles over
+Done this but manually ^^
+
+
+Finish the leaderboard command so it works.
