@@ -1,13 +1,14 @@
 # backend/services/repo.py
+from typing import Tuple, Optional
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from ..models import User, Team, Player, TeamPlayer, ScoringConfig, PlayerStats
-
-from typing import Tuple, Optional
-
 
 from backend.services.leetify_api import current_week_start_london
-from datetime import datetime, timedelta, timezone
+from backend.services.faceit_api import get_faceit_player_by_steam
+from ..models import User, Team, Player, TeamPlayer, ScoringConfig, PlayerStats, PlayerGame
+
 
 def _as_utc(dt: datetime) -> datetime:
     if dt is None:
@@ -15,8 +16,6 @@ def _as_utc(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
-
-
 
 async def get_or_create_user(session: AsyncSession, discord_id: int) -> User:
     res = await session.execute(select(User).where(User.discord_id == discord_id))
@@ -26,6 +25,20 @@ async def get_or_create_user(session: AsyncSession, discord_id: int) -> User:
         session.add(user)
         await session.flush()
     return user
+
+async def get_or_create_player(session: AsyncSession, discord_id: int | str):
+    """
+    Ensure a Player row exists whose handle == discord_id (string).
+    Updates the 'players' table with steamID
+    """
+    handle = str(discord_id)
+    p = await session.scalar(select(Player).where(Player.handle == handle))
+    if p:
+        return p, False
+    p = Player(handle=handle)  # inputs (elos) can be filled later by pricing/update
+    session.add(p)
+    # no commit here; caller's transaction will commit
+    return p, True
 
 async def remove_user_steam_id(
     session: AsyncSession, discord_id: int, *, purge_stats: bool = False, guild_id: Optional[int] = None) -> Tuple[User, Optional[str]]:
@@ -120,13 +133,14 @@ async def get_or_create_scoring(session: AsyncSession) -> ScoringConfig:
 
 async def set_user_steam_id(session: AsyncSession, discord_id: int, steam_id: str) -> User:
     user = await get_or_create_user(session, discord_id)
+    # faceit = await get_faceit_player_by_steam(steam_id)
     user.steam_id = steam_id
+    # user.faceit = faceit
     await session.flush()
     return user
 
-
 async def ensure_player_for_user(session: AsyncSession, user: User) -> Player:
-    res = await session.execute(select(Player).where(Player.faceit_id == None, Player.handle == str(user.discord_id)))
+    res = await session.execute(select(Player).where(Player.handle == str(user.discord_id)))
     p = res.scalar_one_or_none()
     if not p:
         p = Player(handle=str(user.discord_id))
@@ -161,8 +175,6 @@ def is_stale(row: PlayerStats | None) -> bool:
         return True
 
     return (datetime.now(timezone.utc) - fetched) > CACHE_TTL
-
-
 
 async def upsert_stats(
         session: AsyncSession,
@@ -242,3 +254,57 @@ async def upsert_stats(
     session.add(row)
     await session.flush()
     return row
+
+
+async def user_by_discord_or_id(session, discord_id: int | str):
+    return await session.scalar(
+        select(User).where(User.discord_id == str(discord_id))
+    )
+
+async def player_by_handle(session, discord_id: int | str):
+    return await session.scalar(
+        select(Player).where(Player.handle == str(discord_id))
+    )
+
+
+async def leetify_l100_avg(session, user_id: int):
+    q = (
+        select(PlayerGame.leetify_rating)
+        .where(PlayerGame.user_id == user_id)
+        .order_by(PlayerGame.finished_at.desc())
+        .limit(100)
+    )
+    result = await session.execute(q)
+    rows = [r[0] for r in result.all() if r[0] is not None]
+    if rows:
+        return float(sum(rows) / len(rows))
+
+    # fallback if no leetify_rat1
+    q2 = (
+        select(PlayerGame.ct_leetify_rating, PlayerGame.t_leetify_rating)
+        .where(PlayerGame.user_id == user_id)
+        .order_by(PlayerGame.finished_at.desc())
+        .limit(100)
+    )
+    result2 = await session.execute(q2)
+    vals = []
+    for ct, t in result2.all():
+        if ct is not None and t is not None:
+            vals.append((float(ct) + float(t)) / 2.0)
+    return float(sum(vals) / len(vals)) if vals else None
+
+async def upsert_player_ratings_and_l100(session, discord_id: str, *,
+                                         renown_elo: int | None,
+                                         premier_elo: int | None,
+                                         faceit_elo: int | None,
+                                         l100: float | None):
+    p = await player_by_handle(session, discord_id)
+    if not p:
+        return False
+    p.renown_elo = renown_elo
+    p.premier_elo = premier_elo
+    p.faceit_elo = faceit_elo
+    p.leetify_l100_avg = l100
+    p.price_updated_at = datetime.now(timezone.utc)
+    session.add(p)
+    return True

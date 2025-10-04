@@ -1,5 +1,5 @@
 # backend/models/__init__.py
-from sqlalchemy import String, Integer, ForeignKey, UniqueConstraint, Float, BigInteger, DateTime
+from sqlalchemy import String, Integer, ForeignKey, UniqueConstraint, Float, BigInteger, DateTime, Boolean, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from ..db import Base
 from datetime import datetime, timezone
@@ -11,14 +11,22 @@ class User(Base):
     discord_id: Mapped[int] = mapped_column(unique=True, index=True)
     teams: Mapped[list["Team"]] = relationship(back_populates="owner")
     steam_id: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
+    faceit_id: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
 
 class Player(Base):
     __tablename__ = "players"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     handle: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    faceit_id: Mapped[str | None] = mapped_column(String(64))
+    renown_elo: Mapped[int | None]
     premier_elo: Mapped[int | None]
     faceit_elo: Mapped[int | None]
+    leetify_l100_avg: Mapped[float | None]
+
+    skill_score: Mapped[float | None] = mapped_column(Float)
+    percentile: Mapped[float | None] = mapped_column(Float)
+    price: Mapped[int | None] = mapped_column(Integer)
+    price_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
 
 class Team(Base):
     __tablename__ = "teams"
@@ -127,3 +135,81 @@ class WeeklyPoints(Base):
     wr_mult  = mapped_column(Float, default=1.0)
 
     weekly_score = mapped_column(Float, default=0.0)
+
+
+class Match(Base):
+    __tablename__ = "matches"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+
+    # Leetify meta
+    data_source: Mapped[str] = mapped_column(String(32), index=True)          # 'faceit','premier','renown','matchmaking_competitive', ...
+    source_match_id: Mapped[str] = mapped_column(String(64))                   # external match id
+    finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    map_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    replay_url: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    has_banned_player: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Optional normalized team scores (helps win calc if you ever need it)
+    team1_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    team1_score:  Mapped[int | None] = mapped_column(Integer, nullable=True)
+    team2_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    team2_score:  Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint("data_source", "source_match_id", name="uq_match_source_matchid"),
+        Index("idx_matches_source_finished", "data_source", "finished_at"),
+    )
+
+
+class PlayerGame(Base):
+    """
+    One row per (steam_id, match). Only store the tracked user's row,
+    not all 10 players, to keep it lean.
+    """
+    __tablename__ = "player_games"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+
+    # link back to your Discord user (owner of steam account)
+    user_id:  Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
+    steam_id: Mapped[str] = mapped_column(String(32), index=True)
+
+    match_id: Mapped[int] = mapped_column(ForeignKey("matches.id"), index=True)
+    match:    Mapped[Match] = relationship(backref="player_rows")
+
+    # convenient copy to filter by time without join
+    finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    data_source: Mapped[str] = mapped_column(String(32), index=True)
+
+    # player-side stats (store Leetify ratings raw 0–1; scale when scoring)
+    initial_team_number:    Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rounds_count:           Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rounds_won:             Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rounds_lost:            Mapped[int | None] = mapped_column(Integer, nullable=True)
+    won:                    Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    leetify_rating:     Mapped[float | None] = mapped_column(Float)
+    ct_leetify_rating:  Mapped[float | None] = mapped_column(Float)
+    t_leetify_rating:   Mapped[float | None] = mapped_column(Float)
+
+    total_kills:    Mapped[int | None] = mapped_column(Integer)
+    total_deaths:   Mapped[int | None] = mapped_column(Integer)
+    total_assists:  Mapped[int | None] = mapped_column(Integer)
+    kd_ratio:       Mapped[float | None] = mapped_column(Float)
+
+    dpr:                        Mapped[float | None] = mapped_column(Float)  # ADR
+    he_foes_damage_avg:         Mapped[float | None] = mapped_column(Float)
+    flashbang_leading_to_kill:  Mapped[int | None] = mapped_column(Integer)
+    trade_kills_succeed:        Mapped[int | None] = mapped_column(Integer)
+
+    # future: entries, roles, etc., add columns as Leetify exposes
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint("steam_id", "match_id", name="uq_playergame_steam_match"),
+        Index("idx_playergames_user_week", "user_id", "finished_at"),
+        Index("idx_playergames_steam_week", "steam_id", "finished_at"),
+    )

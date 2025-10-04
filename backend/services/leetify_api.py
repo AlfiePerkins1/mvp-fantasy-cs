@@ -3,16 +3,23 @@ from typing import Any, Dict, List, Optional
 from statistics import fmean
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-
+from dotenv import load_dotenv
+import os
 
 LEETIFY_BASE = "https://api-public.cs-prod.leetify.com/v3/profile/matches"
+LEETIFY_PROFILE_URL = "https://api-public.cs-prod.leetify.com/v3/profile"
+
+load_dotenv(".env")
+
+LEETIFY_API_KEY = os.getenv("FACEIT_API_KEY")
+HEADERS = {"_leetify_key": LEETIFY_API_KEY}
 
 async def fetch_recent_matches(steam_id: str, limit: int = 100) -> List[Dict[str, Any]]:
 
     url = f"{LEETIFY_BASE}?steam64_id={steam_id}"
 
     async with httpx.AsyncClient(timeout=20) as client:
-        r = await client.get(url)
+        r = await client.get(url, headers=HEADERS)
         r.raise_for_status()
         data = r.json()
 
@@ -83,10 +90,8 @@ def aggregate_player_stats(matches: List[Dict[str, Any]],
         "faceit": "faceit",
         "renown": "renown",
         "matchmaking_competitive": "mm",
-        "matchmaking": "mm",
+        "matchmaking": "premier",
         "matchmaking_wingman": "wingman",
-        "matchmaking_premier": "premier",
-        "premier": "premier",
     }
 
     for m in matches:
@@ -169,7 +174,7 @@ def aggregate_player_stats(matches: List[Dict[str, Any]],
         "ct_rating": ct_rating,
         "t_rating": t_rating,
         "sample_size": len(leetify_vals),
-        "trade_kills": int(trade_kills_total),
+        "trade_kills": (int(trade_kills_total) / len(leetify_vals)),
 
         "adr": avg_adr,                          # float or None
         "entries": int(entries_total),           # stays 0 until API exposes it
@@ -183,4 +188,23 @@ def aggregate_player_stats(matches: List[Dict[str, Any]],
         "other_games": int(other_games),
 
         "wins": int(wins_total),
+    }
+
+
+async def fetch_profile(steam64_id: str) -> dict | None:
+    """Return the Leetify public profile JSON or None on 404/private."""
+    timeout = httpx.Timeout(10.0, read=10.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        r = await client.get(LEETIFY_PROFILE_URL, params={"steam64_id": steam64_id}, headers=HEADERS)
+        if r.status_code == 200:
+            return r.json()
+        return None
+
+def extract_ranks(profile: dict) -> dict:
+    """Safely get the ranks"""
+    ranks = (profile or {}).get("ranks") or {}
+    return {
+        "renown_elo": ranks.get("renown"),
+        "premier_elo": ranks.get("premier"),
+        "faceit_elo": ranks.get("faceit_elo"),
     }

@@ -1,18 +1,17 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-
-from backend.services.leetify_api import current_week_start_london
+from discord.utils import escape_mentions
 
 from backend.db import SessionLocal
 
-from discord.utils import escape_mentions
+from datetime import datetime, time, timedelta, timezone
+from sqlalchemy import select, func
 
 from backend.models import User, Team, Player, TeamPlayer, ScoringConfig, PlayerStats, WeeklyPoints
+from backend.services.leetify_api import current_week_start_london
 
 
-
-from sqlalchemy import select
 
 
 NO_PINGS = discord.AllowedMentions.none()
@@ -44,6 +43,14 @@ class Leaderboards(commands.Cog):
 
     @leaderboard.command(name="show", description="Show this week's leaderboard")
     async def show(self, interaction: discord.Interaction, limit: int = 10):
+        """
+            Displays the top players in the server based on fantasy points scored in the last 7 days.
+            Reads Weekly_points table and filters rows so the week start is >= today - 7 days, the players are in this
+            server and not another, and weekly score isnt null
+
+            Use to check the current individual fantasy leaderboard for the past week.
+
+        """
 
         guild = interaction.guild
         guild_id = interaction.guild_id
@@ -51,28 +58,27 @@ class Leaderboards(commands.Cog):
             await interaction.response.send_message("Use this in a server (not DMs).", ephemeral=True)
             return
 
-        # Defer to avoid 3s timeouts
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=False)
 
-        week_start = current_week_start_london().date()
-        limit = max(1, min(int(limit), 25))  # clamp 1..25
+        # last 7 days window (robust against DATE/DATETIME mismatch)
+        since_dt = datetime.now(timezone.utc) - timedelta(days=7)
+        limit = max(1, min(int(limit), 25))
 
-        # Pull top N from weekly_points
+        # pull top N — LEFT JOIN so a missing User row doesn't drop the score
         async with SessionLocal() as session:
             async with session.begin():
                 rows = (await session.execute(
                     select(
                         WeeklyPoints.user_id,
                         WeeklyPoints.weekly_score,
-                        WeeklyPoints.sample_size,
                         User.discord_id,
                     )
-                    .join(User, User.id == WeeklyPoints.user_id)
+                    .join(User, User.id == WeeklyPoints.user_id, isouter=True)
                     .where(
-                        WeeklyPoints.week_start == week_start,
                         WeeklyPoints.guild_id == guild_id,
-                        WeeklyPoints.sample_size > 0,
+                        WeeklyPoints.week_start >= since_dt,
+                        WeeklyPoints.weekly_score.isnot(None),
                     )
                     .order_by(WeeklyPoints.weekly_score.desc())
                     .limit(limit)
@@ -80,35 +86,33 @@ class Leaderboards(commands.Cog):
 
         if not rows:
             await interaction.followup.send(
-                "No scores for this week yet. Run `/team snapshot` (or `/team show`) to generate them.",
+                "No scores in the last 7 days. Run `/team show` for players, then `/team snapshot`.",
                 allowed_mentions=NO_PINGS,
             )
             return
 
-        # Render
         def fmt_1dp(x) -> str:
             try:
                 return f"{float(x):.1f}"
             except Exception:
                 return "0.0"
 
-        header = f"{'#':<2}  {'Player':<22} {'Score':>7} {'Games':>5}"
-        sep = f"{'–' * 2}  {'–' * 22} {'–' * 7} {'–' * 5}"
+        header = f"{'#':<2}  {'Player':<24} {'Score':>7}"
+        sep = f"{'–' * 2}  {'–' * 24} {'–' * 7}"
         lines = ["```", header, sep]
 
-        for rank, (user_id, score, games, discord_id) in enumerate(rows, start=1):
-            # Resolve a display name from Discord ID (no pings)
+        for rank, (user_id, score, discord_id) in enumerate(rows, start=1):
             if discord_id:
                 name = await _resolve_display_name_quick(guild, int(discord_id), fallback=str(discord_id))
+                name = "@" + escape_mentions(name)
             else:
                 name = f"User {user_id}"
-            name = escape_mentions(name)[:22]
-            lines.append(f"{rank:<2}  {name:<22} {fmt_1dp(score):>7} {int(games):>5}")
+            lines.append(f"{rank:<2}  {name[:24]:<24} {fmt_1dp(score):>7}")
 
         lines.append("```")
 
         embed = discord.Embed(
-            title=f"Leaderboard — Week of {week_start.isoformat()}",
+            title="Leaderboard — Last 7 Days",
             description="\n".join(lines),
             type="rich",
         )
