@@ -109,7 +109,7 @@ class Pricing(commands.Cog):
             lines.append(f"**{i}.** {mention} — **{price:,}**")
 
         embed = discord.Embed(
-            title="💰 Pricing Leaderboard",
+            title="Pricing",
             description="\n".join(lines),
             color=discord.Color.gold()
         )

@@ -1,63 +1,87 @@
 # bot/bot.py
 import os
+import sys
 import logging
 import asyncio
+from logging.handlers import RotatingFileHandler
+import traceback
+
 import discord
 from discord.ext import commands
+from discord import app_commands
 from dotenv import load_dotenv
+
 from backend.db import init_db
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-# Optional: set your test server ID for instant (guild) slash commands
-GUILD_ID = os.getenv("GUILD_ID")  # put the number in .env or leave unset for global
+GUILD_ID = os.getenv("GUILD_ID")  # optional: fast guild-only sync
 GUILD_OBJECT = discord.Object(id=int(GUILD_ID)) if GUILD_ID else None
 
-# Logging so you SEE what's happening
-logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(levelname)-8s] %(name)s: %(message)s')
+LOG_FILE = "logs/bot.log"
+
+def setup_logging():
+    os.makedirs("logs", exist_ok=True)
+    fmt = "[%(asctime)s] [%(levelname)-8s] %(name)s: %(message)s"
+    datefmt = "%Y-%m-%d %H:%M:%S"
+
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+
+    # console
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(logging.Formatter(fmt, datefmt))
+
+    # rotating file so it doesnt get too big
+    fh = RotatingFileHandler(LOG_FILE, maxBytes=5_000_000, backupCount=3, encoding="utf-8")
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(logging.Formatter(fmt, datefmt))
+
+    root.handlers.clear()
+    root.addHandler(ch)
+    root.addHandler(fh)
+
+setup_logging()
 log = logging.getLogger("fantasy-bot")
 
 intents = discord.Intents.default()
+intents.members = True
 
 
 class FantasyBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix="!", intents=intents)
 
-    async def setup_hook(self):
-        # 1) Load cogs
-        await self.load_all_cogs()
-
-        # 2) Sync slash commands
-        try:
-            if GUILD_OBJECT:
-                synced = await self.tree.sync(guild=GUILD_OBJECT)
-                log.info(f"Slash commands synced to guild {GUILD_ID}: {len(synced)}")
-            else:
-                synced = await self.tree.sync()
-                log.info(f"Global slash commands synced: {len(synced)} (may take a few minutes to appear)")
-        except Exception as e:
-            log.exception("Slash command sync failed: %s", e)
-
     async def load_all_cogs(self):
-        # Load every .py file inside bot/cogs
-        import os
         cogs_dir = os.path.join(os.path.dirname(__file__), "cogs")
         for file in os.listdir(cogs_dir):
             if file.endswith(".py") and not file.startswith("_"):
                 ext = f"cogs.{file[:-3]}"
                 try:
                     await self.load_extension(ext)
-                    log.info(f"Loaded cog: {ext}")
-                except Exception as e:
-                    log.exception(f"Failed to load cog {ext}: {e}")
+                    log.info("Loaded cog: %s", ext)
+                except Exception:
+                    log.exception("Failed to load cog %s", ext)
 
     async def setup_hook(self):
-        # init database
+        # init DB first
         await init_db()
+
+        # load cogs
         await self.load_all_cogs()
-        await self.tree.sync()
+
+        # sync slash commands
+        try:
+            if GUILD_OBJECT:
+                synced = await self.tree.sync(guild=GUILD_OBJECT)
+                log.info("Slash commands synced to guild %s: %d", GUILD_ID, len(synced))
+            else:
+                synced = await self.tree.sync()
+                log.info("Global slash commands synced: %d (may take a few minutes to appear)", len(synced))
+        except Exception:
+            log.exception("Slash command sync failed")
 
 
 bot = FantasyBot()
@@ -65,7 +89,66 @@ bot = FantasyBot()
 
 @bot.event
 async def on_ready():
-    log.info(f"READY: {bot.user} (latency {bot.latency:.3f}s)")
+    log.info("READY: %s#%s (latency %.3fs)", bot.user.name, bot.user.discriminator, bot.latency)
+
+
+# Command logging
+@bot.event
+async def on_interaction(interaction: discord.Interaction):
+    """
+    Logs every *attempted* application command invocation.
+    Then lets discord.py process it normally.
+    """
+    try:
+        if interaction.type == discord.InteractionType.application_command and interaction.command:
+            user = f"{interaction.user} ({interaction.user.id})"
+            guild = f"{interaction.guild.name} ({interaction.guild_id})" if interaction.guild else "DM"
+            channel = f"{interaction.channel} ({getattr(interaction.channel, 'id', 'n/a')})"
+            cmd = interaction.command.qualified_name  # e.g. "team show"
+            log.info("RUN: %s | %s | %s | /%s", user, guild, channel, cmd)
+    except Exception:
+        log.exception("Failed pre-log on_interaction")
+
+    # allow the library to continue handling the command
+    await bot.process_application_commands(interaction)
+
+
+@bot.event
+async def on_app_command_completion(interaction: discord.Interaction, command: app_commands.Command):
+    """Logs successful completions."""
+    try:
+        user = f"{interaction.user} ({interaction.user.id})"
+        guild = f"{interaction.guild.name} ({interaction.guild_id})" if interaction.guild else "DM"
+        channel = f"{interaction.channel} ({getattr(interaction.channel, 'id', 'n/a')})"
+        cmd = command.qualified_name
+        log.info("OK:  %s | %s | %s | /%s", user, guild, channel, cmd)
+    except Exception:
+        log.exception("Failed logging completion")
+
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    """Logs slash command errors + traceback and notifies the user generically."""
+    try:
+        user = f"{interaction.user} ({interaction.user.id})" if interaction and interaction.user else "n/a"
+        guild = f"{interaction.guild.name} ({interaction.guild_id})" if interaction and interaction.guild else "DM/n-a"
+        channel = f"{interaction.channel} ({getattr(interaction.channel, 'id', 'n/a')})" if interaction else "n/a"
+        cmd = getattr(interaction.command, "qualified_name", "unknown") if interaction else "unknown"
+        log.error("ERR: %s | %s | %s | /%s | %r", user, guild, channel, cmd, error)
+        tb = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+        log.error("TRACE:\n%s", tb)
+
+        # user-facing message
+        if interaction:
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("Something went wrong running that command. I've stored it in the logs and if alfie isn't lazy he'll check (it'll never be looked at)", ephemeral=True)
+                else:
+                    await interaction.followup.send("Something went wrong running that command. I've stored it in the logs and if alfie isn't lazy he'll check (it'll never be looked at)", ephemeral=True)
+            except Exception:
+                pass
+    except Exception:
+        log.exception("Failed logging app command error")
 
 
 def main():
