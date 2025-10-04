@@ -2,11 +2,11 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-from discord.utils import escape_mentions
+
 
 from typing import Optional
 from datetime import datetime, timezone, timedelta
-import inspect
+
 
 from sqlalchemy import select, func, delete, insert, case
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -16,7 +16,7 @@ from backend.services.leetify_api import current_week_start_london
 from backend.services.repo import get_or_create_user, upsert_stats
 from backend.models import User, Team, Player, TeamPlayer, WeeklyPoints, PlayerGame, Match
 from backend.services.ingest_user import ingest_user_recent_matches
-from backend.services.scoring import make_breakdown
+
 
 
 

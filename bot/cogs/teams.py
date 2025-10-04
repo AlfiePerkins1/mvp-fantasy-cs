@@ -5,7 +5,7 @@ from discord.ext import commands
 from typing import Optional
 from sqlalchemy import select, func
 from discord.utils import escape_mentions
-from datetime import datetime, timedelta
+from datetime import timedelta
 from backend.db import SessionLocal
 
 from backend.services.repo import get_or_create_user, create_team, ensure_player_for_user

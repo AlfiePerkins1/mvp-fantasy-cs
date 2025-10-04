@@ -1,9 +1,11 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
+from discord.utils import escape_mentions
+
 from backend.db import SessionLocal
 from backend.services.repo import set_user_steam_id, remove_user_steam_id, get_or_create_player, get_or_create_user
-from discord.utils import escape_mentions
+
 
 
 class Account(commands.Cog):

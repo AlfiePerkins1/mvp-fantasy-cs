@@ -46,7 +46,7 @@ def setup_logging():
 setup_logging()
 log = logging.getLogger("fantasy-bot")
 
-intents = discord.Intents.default()
+intents = discord.Intents.all()
 intents.members = True
 
 
@@ -55,10 +55,13 @@ class FantasyBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
 
     async def load_all_cogs(self):
+        import os
         cogs_dir = os.path.join(os.path.dirname(__file__), "cogs")
+        base_pkg = "bot.cogs"
+
         for file in os.listdir(cogs_dir):
             if file.endswith(".py") and not file.startswith("_"):
-                ext = f"cogs.{file[:-3]}"
+                ext = f"{base_pkg}.{file[:-3]}"  # e.g. bot.cogs.util
                 try:
                     await self.load_extension(ext)
                     log.info("Loaded cog: %s", ext)
@@ -102,15 +105,13 @@ async def on_interaction(interaction: discord.Interaction):
     try:
         if interaction.type == discord.InteractionType.application_command and interaction.command:
             user = f"{interaction.user} ({interaction.user.id})"
-            guild = f"{interaction.guild.name} ({interaction.guild_id})" if interaction.guild else "DM"
+            guild = f"{interaction.guild.name}" if interaction.guild else "DM"
             channel = f"{interaction.channel} ({getattr(interaction.channel, 'id', 'n/a')})"
             cmd = interaction.command.qualified_name  # e.g. "team show"
             log.info("RUN: %s | %s | %s | /%s", user, guild, channel, cmd)
     except Exception:
-        log.exception("Failed pre-log on_interaction")
-
-    # allow the library to continue handling the command
-    await bot.process_application_commands(interaction)
+        log.exception("Failed pre-invoke log")
+    return True
 
 
 @bot.event
@@ -118,7 +119,7 @@ async def on_app_command_completion(interaction: discord.Interaction, command: a
     """Logs successful completions."""
     try:
         user = f"{interaction.user} ({interaction.user.id})"
-        guild = f"{interaction.guild.name} ({interaction.guild_id})" if interaction.guild else "DM"
+        guild = f"{interaction.guild.name}" if interaction.guild else "DM"
         channel = f"{interaction.channel} ({getattr(interaction.channel, 'id', 'n/a')})"
         cmd = command.qualified_name
         log.info("OK:  %s | %s | %s | /%s", user, guild, channel, cmd)

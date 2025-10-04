@@ -5,11 +5,11 @@ from discord.utils import escape_mentions
 
 from backend.db import SessionLocal
 
-from datetime import datetime, time, timedelta, timezone
-from sqlalchemy import select, func
+from datetime import datetime, timedelta, timezone
+from sqlalchemy import select
 
-from backend.models import User, Team, Player, TeamPlayer, ScoringConfig, PlayerStats, WeeklyPoints
-from backend.services.leetify_api import current_week_start_london
+from backend.models import User, WeeklyPoints
+
 
 
 
