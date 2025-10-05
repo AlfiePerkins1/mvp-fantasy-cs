@@ -158,8 +158,17 @@ This skill score is then converted to percentiles (across the global userbase) w
 
 The final price is calculated as follows: <br>
 `price = P_MIN + (P_MAX − P_MIN) * (percentile ** GAMMA)` <br>
+
 Where: Minimum = 1000, Maximum = 12000, Gamma = 3.5. Gamma affects the slope of the pricing function. For example a Gamma of 
 1.0 would make the price curve linear, 2.0 would be mildly exponential and 3.5 is exponential.
+
+The chart below shows how these lines look in practice with the Y-axis representing price and the X axis representing the players percentile
+The lines show:
+- <span style="color:#2E74D3">Gamma = 1</span>.
+- <span style="color:#C65252">Gamma = 2</span>.
+- <span style="color:#000000">Gamma = 3.5</span>
+
+![Player Price Gamma](images/pricing_graph.PNG "Gamma chart")
 
 
 ### Example Calculations
