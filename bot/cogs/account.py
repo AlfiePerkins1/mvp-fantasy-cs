@@ -5,7 +5,7 @@ from discord.utils import escape_mentions
 
 from backend.db import SessionLocal
 from backend.services.repo import set_user_steam_id, remove_user_steam_id, get_or_create_player, get_or_create_user
-
+from backend.services.leetify_api import leetify_profile_exists
 
 
 class Account(commands.Cog):
@@ -20,32 +20,66 @@ class Account(commands.Cog):
     @app_commands.describe(steamid="Your SteamID(64 - bit E.G 76561198259409483)")
     async def register(self, interaction: discord.Interaction, steamid: str):
         """
-            Links a discord user to their steam account
+                Links a discord user to their steam account
 
-            Runs get_or_create_user to update the steamID for their sicrod ID.
+                Runs get_or_create_user to update the steamID for their sicrod ID.
 
-            Use when first registering with the fantasy bot to link steam and be avaliable
+                Use when first registering with the fantasy bot to link steam and be avaliable
 
 
         """
         await interaction.response.defer(ephemeral=True, thinking=True)
 
-        discord_id = interaction.user.id
+        member = interaction.user
+        discord_id = member.id
         steamid = steamid.strip()
 
+        # grab readable names
+        discord_username = member.name
+        discord_global_name = getattr(member, "global_name", None)
+        discord_display_name = member.display_name
+
         async with SessionLocal() as session:
-            async with session.begin():  # one transaction; auto-commits on success
-                # make sure the user exists
-                user = await get_or_create_user(session, discord_id=discord_id)
-                # link/update steam id
+            async with session.begin():
+                user = await get_or_create_user(
+                    session,
+                    discord_id=discord_id,
+                    discord_username=discord_username,
+                    discord_global_name=discord_global_name,
+                    discord_display_name=discord_display_name,
+                )
                 await set_user_steam_id(session, discord_id, steamid)
-                # NEW: ensure there's a players row
                 player, created = await get_or_create_player(session, discord_id)
 
-        msg = "Registered! Your SteamID is linked."
+        exists = await leetify_profile_exists(steamid)
+
+        if exists is not None:
+            async with SessionLocal() as session:
+                async with session.begin():
+                    user = await get_or_create_user(session, discord_id=discord_id)
+                    user.has_leetify = bool(exists)
+
+        msg = f"Registered! Linked SteamID `{steamid}` for **{discord_display_name}**."
         if created:
             msg += " You’ve been added to the player pool."
-        await interaction.followup.send(msg, ephemeral=True)
+
+        if exists is True:
+            tail = " I can fetch your matches and compute stats normally."
+        elif exists is False:
+            tail = (
+                " **Warning:** I couldn’t find a Leetify account for this SteamID "
+                "(the API returned 404 Not Found). Your bot features will be *very* limited "
+                "until you create one. You can sign up here: https://leetify.com/invite/b7b82917-06ce-49cd-b715-6f6b6b47212c"
+                " If you believe this to be an error please create a new issue on the [GitHub Repository](https://github.com/AlfiePerkins1/mvp_fantasy_cs_issues)"
+            )
+        else:  # None (unknown / transient)
+            tail = (
+                " I couldn’t verify your Leetify profile right now (temporary error). "
+                "I’ll try again later, or you can run `/scoring update_stats fetch:true` (Admin Only)."
+            )
+
+        await interaction.followup.send(f"{msg} {tail}", ephemeral=True)
+
 
     @account.command(name="unlink_user", description="(Admin) Unlink a member’s Steam account")
     @app_commands.checks.has_permissions(administrator=True)

@@ -1,18 +1,41 @@
 import httpx
 from typing import Any, Dict, List, Optional
-from statistics import fmean
-from datetime import datetime, timedelta
+
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 import os
+import pytz
 
 LEETIFY_BASE = "https://api-public.cs-prod.leetify.com/v3/profile/matches"
 LEETIFY_PROFILE_URL = "https://api-public.cs-prod.leetify.com/v3/profile"
-
+LEETIFY_MATCHES_URL = "https://api-public.cs-prod.leetify.com/v3/profile/matches"
 load_dotenv(".env")
 
 LEETIFY_API_KEY = os.getenv("FACEIT_API_KEY")
 HEADERS = {"_leetify_key": LEETIFY_API_KEY}
+
+LONDON = pytz.timezone("Europe/London")
+
+def week_start_london(now: datetime | None = None) -> datetime:
+    if now is None:
+        now = datetime.now(tz=LONDON)
+    else:
+        now = now.astimezone(LONDON)
+    monday = now - timedelta(days=now.weekday())
+    return monday.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=LONDON)
+
+def normalize_week_utc_naive(dt: datetime) -> datetime:
+    """Convert a tz-aware London datetime to UTC and drop tzinfo for SQLite TEXT storage."""
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+def current_week_start_norm(now: datetime | None = None) -> datetime:
+    return normalize_week_utc_naive(week_start_london(now))
+
+def next_week_start_norm(now: datetime | None = None) -> datetime:
+    return current_week_start_norm(now) + timedelta(days=7)
+
+
 
 async def fetch_recent_matches(steam_id: str, limit: int = 100) -> List[Dict[str, Any]]:
 
@@ -39,6 +62,9 @@ def _safe_int(x: Any) -> Optional[int]:
     except (ValueError, TypeError):
         return None
 
+def next_week_start_london(now: Optional[datetime]) -> datetime:
+    this_week = current_week_start_london(now)
+    return (this_week + timedelta(days=7)).date()
 
 def current_week_start_london(now: datetime | None = None) -> datetime:
     now = now or datetime.now(tz=ZoneInfo("Europe/London"))
@@ -208,3 +234,26 @@ def extract_ranks(profile: dict) -> dict:
         "premier_elo": ranks.get("premier"),
         "faceit_elo": ranks.get("faceit_elo"),
     }
+
+async def leetify_profile_exists(steam64_id: str) -> bool | None:
+    """
+    Returns:
+      True  -> Leetify profile/matches endpoint returns 200 OK
+      False -> 404 Not Found (likely no Leetify account / no data)
+      None  -> Unknown (temporary error or non-404 failure)
+    """
+    params = {"steam64_id": steam64_id}
+    timeout = httpx.Timeout(10.0)
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        try:
+            r = await client.get(LEETIFY_MATCHES_URL, params=params)
+        except httpx.HTTPError:
+            return None  # network/timeout
+
+    if r.status_code == 200:
+        return True
+    if r.status_code == 404:
+        return False
+    # 401/403 could be privacy/other; 5xx transient
+    return None

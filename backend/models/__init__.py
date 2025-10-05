@@ -13,6 +13,12 @@ class User(Base):
     steam_id: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
     faceit_id: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
 
+    discord_username: Mapped[str | None] = mapped_column(String, nullable=True)
+    discord_global_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    discord_display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    has_leetify: Mapped[bool] = mapped_column(Boolean, nullable=True)
+
 class Player(Base):
     __tablename__ = "players"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -36,15 +42,24 @@ class Team(Base):
     owner: Mapped["User"] = relationship(back_populates="teams")
     players: Mapped[list["TeamPlayer"]] = relationship(back_populates="team", cascade="all, delete-orphan")
     guild_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    build_complete: Mapped[bool] = mapped_column(Boolean, default=False)
+
     __table_args__ = (UniqueConstraint("owner_id", "guild_id", name="uq_owner_per_guild"),  # <= one team per user per server
                       UniqueConstraint("guild_id", "name", name="uq_teamname_per_guild"),   # <= Prevent duplicate teamnames
                       )
+
 class TeamPlayer(Base):
     __tablename__ = "team_players"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"))
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
     role: Mapped[str | None] = mapped_column(String(16))  # star, entry, awper, support, igl
+
+    team: Mapped["Team"] = relationship(back_populates="players")
+    player: Mapped["Player"] = relationship()
+
+    effective_from_week: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    effective_to_week: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
     team: Mapped["Team"] = relationship(back_populates="players")
     player: Mapped["Player"] = relationship()
@@ -212,4 +227,20 @@ class PlayerGame(Base):
         UniqueConstraint("steam_id", "match_id", name="uq_playergame_steam_match"),
         Index("idx_playergames_user_week", "user_id", "finished_at"),
         Index("idx_playergames_steam_week", "steam_id", "finished_at"),
+    )
+
+
+class TeamWeekState(Base):
+    __tablename__ = "team_week_state"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    guild_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), index=True)
+    week_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    budget_remaining: Mapped[float | None] = mapped_column(Float)
+    transfers_used: Mapped[int | None] = mapped_column(Integer)
+
+
+    __table_args__ = (
+    UniqueConstraint("guild_id", "team_id", "week_start"),
     )

@@ -17,14 +17,31 @@ def _as_utc(dt: datetime) -> datetime:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
 
-async def get_or_create_user(session: AsyncSession, discord_id: int) -> User:
+async def get_or_create_user(
+    session: AsyncSession,
+    discord_id: int,
+    discord_username: str | None = None,
+    discord_global_name: str | None = None,
+    discord_display_name: str | None = None,
+) -> User:
     res = await session.execute(select(User).where(User.discord_id == discord_id))
     user = res.scalar_one_or_none()
+
     if not user:
         user = User(discord_id=discord_id)
         session.add(user)
         await session.flush()
+
+    # Update name fields if provided
+    if discord_username is not None:
+        user.discord_username = discord_username
+    if discord_global_name is not None:
+        user.discord_global_name = discord_global_name
+    if discord_display_name is not None:
+        user.discord_display_name = discord_display_name
+
     return user
+
 
 async def get_or_create_player(session: AsyncSession, discord_id: int | str):
     """
