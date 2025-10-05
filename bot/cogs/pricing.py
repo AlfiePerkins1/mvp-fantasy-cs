@@ -82,7 +82,7 @@ class Pricing(commands.Cog):
 
         await interaction.followup.send(msg, ephemeral=True)
 
-    @pricing.command(name="prices", description="List all registered players and their prices (highest to lowest")
+    @pricing.command(name="show", description="List all registered players and their prices (highest to lowest")
     @app_commands.describe(limit="How many players to show (1–50).")
     async def leaderboard(self, interaction: discord.Interaction, limit: int = 20):
         limit = max(1, min(50, limit))

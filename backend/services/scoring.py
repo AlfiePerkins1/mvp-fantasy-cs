@@ -50,7 +50,7 @@ def compute_weekly_from_playerstats(ps, *, alpha: float = 10.0, k: float = 0.60,
 
     weekly_base = base_avg * avg_mult
 
-    # 3) win-rate multiplier (shrink to 50% for small samples)
+    # win-rate multiplier (shrink to 50% for small samples)
     wins = int(_v(ps.wins, 0))
     wr_eff = (wins + alpha * 0.5) / (games_total + alpha)
     wr_mult = min(1.0 + max(0.0, wr_eff - 0.5) * k, cap)

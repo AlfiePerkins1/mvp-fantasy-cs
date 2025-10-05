@@ -93,7 +93,7 @@ async def sell_player(session, team_id: int, player_id: int, now: datetime) -> s
 
     next_week = next_week_start_norm(now)
     print(f'Selling: Next week: {next_week}')
-    # Either queued buy that hasn't taken effect yet -> cancel it (cleanest is delete)
+    # Either queued buy that hasn't taken effect yet -> cancel/delete it
     queued = await session.scalar(
         select(TeamPlayer).where(
             TeamPlayer.team_id == team_id,

@@ -1,3 +1,51 @@
+# environments & secrets
+.env
+*.env
+.env.*.local
+
+# databases & logs
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+data/raw/**
+logs/**
+!logs/.gitkeep
+fantasy.db
+
+**/backend/models
+**/backend/routes
+**/backend/db.py
+**/backend/main.py
+
+data/
+docs/
+
+
+data/
+jobs/
+images/
+
+command_guide.md
+requirements.md
+start_bot.bat
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Below is default pycharm recommendations
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

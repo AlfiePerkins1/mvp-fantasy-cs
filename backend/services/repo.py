@@ -242,8 +242,6 @@ async def upsert_stats(
         row.wins = wins
 
 
-
-
         row.fetched_at = now
         await session.flush()
         return row
