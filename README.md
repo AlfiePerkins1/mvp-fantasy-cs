@@ -85,51 +85,51 @@ MVP Fantasy is a discord based bot that allows the creation of fantasy leagues w
 In this scenario we have 3 players:
 - Player 1 is your average Premier player 
 
-1. Base Average:
-`(1.10×10) + (80×0.1) + (5×2) + (2×3) + (3×1) + (150×0.05)`
-`= 11 + 8 + 10 + 6 + 3 + 7.5 = 45.5 points`
+1. Base Average: <br>
+`(1.10×10) + (80×0.1) + (5×2) + (2×3) + (3×1) + (150×0.05)` <br>
+`= 11 + 8 + 10 + 6 + 3 + 7.5 = 45.5 points` <br>
 
-2. Platform Multiplier [^2]
+2. Platform Multiplier [^2] <br>
 `45.5 x 1`
 
-3. Win-rate Multiplier(10W | 18G)
-`wr_eff = (10 + 10 x 0.5)/(18 + 10) = 0.571`
-`wr_mult = 1.0 + (0.571 - 0.5) x 0.6 = 1.0426`
+3. Win-rate Multiplier(10W | 18G) <br>
+`wr_eff = (10 + 10 x 0.5)/(18 + 10) = 0.571` <br>
+`wr_mult = 1.0 + (0.571 - 0.5) x 0.6 = 1.0426` <br>
 
-4. Final Weekly Score:
-`45`.5 x 1.04 = **47.4**`
+4. Final Weekly Score: <br>
+`45.5 x 1.04 = **47.4**` <br>
 
-- Player 2 is a decent Faceit player
+- Player 2 is a decent Faceit player 
 
-1. Base Average:
-`(1.2×10) + (90×0.1) + (6×2) + (4×3) + (2×1) + (200×0.05)`
-`= 12 + 9 + 12 + 12 + 2 + 10 = 57 points`
+1. Base Average: <br>
+`(1.2×10) + (90×0.1) + (6×2) + (4×3) + (2×1) + (200×0.05)` <br>
+`= 12 + 9 + 12 + 12 + 2 + 10 = 57 points` <br>
 
-2. Platform Multiplier [^2]
-`57 × 1.2 = 68.4`
+2. Platform Multiplier [^2] <br>
+`57 × 1.2 = 68.4` <br>
 
-3. Win-rate Multiplier(10W | 18G)
-`wr_eff = (13 + 10 × 0.5) / (20 + 10) = 0.6`
-`wr_mult = 1 + (0.6 − 0.5) × 0.6 = 1.06`
+3. Win-rate Multiplier(10W | 18G) <br>
+`wr_eff = (13 + 10 × 0.5) / (20 + 10) = 0.6` <br> 
+`wr_mult = 1 + (0.6 − 0.5) × 0.6 = 1.06` <br>
 
-4. Final Weekly Score:
-`68.4 x 1.06 = **72.5**`
+4. Final Weekly Score: <br>
+`68.4 x 1.06 = **72.5**` <br>
 
-- Player 3 is a renown player who doesn't play often
+- Player 3 is a renown player who doesn't play often <br>
 
-1. Base Average:
-`(1.15×10) + (85×0.1) + (4×2) + (1×3) + (1×1) + (100×0.05)`
-`= 11.5 + 8.5 + 8 + 3 + 1 + 5 = 37`
+1. Base Average: <br>
+`(1.15×10) + (85×0.1) + (4×2) + (1×3) + (1×1) + (100×0.05)` <br>
+`= 11.5 + 8.5 + 8 + 3 + 1 + 5 = 37` <br>
 
-2. Platform Multiplier [^2]
-`37 x 1.1 = 40.7`
+2. Platform Multiplier [^2] <br>
+`37 x 1.1 = 40.7` <br>
 
-3. Win-rate Multiplier(10W | 18G)
-`wr_eff = (2 + 10 × 0.5) / (2 + 10) = 0.583`
-`wr_mult = 1 + (0.583 − 0.5) × 0.6 = 1.05`
+3. Win-rate Multiplier(10W | 18G) <br>
+`wr_eff = (2 + 10 × 0.5) / (2 + 10) = 0.583` <br>
+`wr_mult = 1 + (0.583 − 0.5) × 0.6 = 1.05` <br>
 
-4. Final Weekly Score:
-40.7 * 1.05 **42.7**
+4. Final Weekly Score: <br>
+`40.7 * 1.05 **42.7**` <br>
 
 
 [^1]: Currently not supported by Leetify API, Coming Soon
