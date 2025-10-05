@@ -132,11 +132,19 @@ wr_mult = 1 + (0.583 − 0.5) × 0.6 = 1.05
 40.7 * 1.05 **42.7**
 
 
-
-
-
 [^1]: Currently not supported by Leetify API, Coming Soon
 [^2]: Platform multiplier is calculated on a game-by-game basis not once
 
 
+## Pricing calculations
+
+# Example Images
+
+Below shows the `/pricing prices` command and lists player prices in order of most expensive to cheapest
+
+![Player Pricing display](images/Player_Prices.PNG "Player Pricing display")
+
+Below shows the `/team show` command with information about this weeks games. The role column is coming soon and will feature multipliers for different stats.
+
+![Team display](images/team_display.PNG "Team display")
 
