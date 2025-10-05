@@ -164,9 +164,9 @@ Where: Minimum = 1000, Maximum = 12000, Gamma = 3.5. Gamma affects the slope of 
 
 The chart below shows how these lines look in practice with the Y-axis representing price and the X axis representing the players percentile
 The lines show:
-- <span style="color:#2E74D3">Gamma = 1</span>.
-- <span style="color:#C65252">Gamma = 2</span>.
-- <span style="color:#000000">Gamma = 3.5</span>
+- <span style="color:#2E74D3"> Blue = Gamma = 1</span>.
+- <span style="color:#C65252">Red = Gamma = 2</span>.
+- <span style="color:#000000">Black = Gamma = 3.5</span>
 
 ![Player Price Gamma](images/pricing_graph.PNG "Gamma chart")
 
