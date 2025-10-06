@@ -10,9 +10,26 @@
 
 MVP Fantasy is a discord based bot that allows the creation of fantasy leagues within a discord server, similiar in nature to [Fantasy Premier League](https://fantasy.premierleague.com/).
 
+# Invite
+
+If you're an Administrator of a server you can add the bot via the link below. The bot is still in development stage so issues may arise. 
+
+
+[Minimal Permissions](https://discord.com/oauth2/authorize?client_id=1423261991350439956&permissions=580819165342784&integration_type=0&scope=applications.commands+bot)
+
+Minimal permissions refer to the minimum permissions that allow the bot to work. Although these permissions have had minimal testing (but should still work). If they don't create an issue on github
+
+## Reporting Issues
+
+If you encounter any issues (including commands that fail), please fill out an issue on the [Github Issues Page](https://github.com/AlfiePerkins1/mvp-fantasy-cs/issues) with as much information as possible 
+
+
+
 ## What the project is
 
+This project allows friends to compete with one another by creating their own fantasy CS2 teams containing players in their own discord server. It features weekly leaderboards as well as a novel pricing scheme.
 
+Players can purchase and sell up to 1 player a week to try and maximise their points. Points are calculated with various statistics from players real games over the leaderboard period (resets Monday 00:00 UK time)
 
 ## How it works
 - Users register their CS2 profile, which links their SteamID and automatically pulls matches via Leetify
