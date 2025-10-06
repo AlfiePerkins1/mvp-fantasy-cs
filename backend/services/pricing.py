@@ -12,8 +12,8 @@ from backend.services.leetify_api import fetch_profile, extract_ranks
 # Pricing config
 
 P_MIN = 1_000            # floor price
-P_MAX = 12_000           # ceiling price
-GAMMA = 3.5              # makes top players expensive
+P_MAX = 11_000           # ceiling price
+GAMMA = 2             # makes top players expensive
 
 # feature weights into a single skill score
 W_LEETIFY = 0.50
