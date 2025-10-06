@@ -12,7 +12,7 @@ LEETIFY_PROFILE_URL = "https://api-public.cs-prod.leetify.com/v3/profile"
 LEETIFY_MATCHES_URL = "https://api-public.cs-prod.leetify.com/v3/profile/matches"
 load_dotenv(".env")
 
-LEETIFY_API_KEY = os.getenv("FACEIT_API_KEY")
+LEETIFY_API_KEY = os.getenv("LEETIFY_API_KEY")
 HEADERS = {"_leetify_key": LEETIFY_API_KEY}
 
 LONDON = pytz.timezone("Europe/London")

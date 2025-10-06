@@ -3,10 +3,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-
 from typing import Optional
 from datetime import datetime, timezone, timedelta
-
+import math
 
 from sqlalchemy import select, func, delete, insert, case
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -79,7 +78,7 @@ async def aggregate_week_from_db(session, *, user_id: int, week_start_utc: datet
     )).one()
 
     (games, avg_rating, trades, adr, flashes, util,ct_rating, t_rating, wins, n_p, n_f, n_r, n_m) = res
-
+    print(res)
     return {
         "sample_size": _i(games),
         "avg_leetify_rating": _v(avg_rating, None),
@@ -252,6 +251,14 @@ async def _aggregate_ps_from_db(session, *, user_id: int, week_start_utc: dateti
         "wins":               int(wins or 0),
     }
 
+# This function helps identify if a user has played no games
+def n0(x):
+    try:
+        if x is None: return 0.0
+        fx = float(x)
+        return 0.0 if math.isnan(fx) else fx
+    except Exception:
+        return 0.0
 
 class Scoring(commands.Cog):
     """Scoring config & queries: view, set weights/multipliers, preview points."""
@@ -389,6 +396,8 @@ class Scoring(commands.Cog):
         week_start = current_week_start_london()
         updated, failed = 0, []
 
+        skipped_no_games = []
+
         async with SessionLocal() as session:
             users = (await session.execute(
                 select(User.id, User.discord_id, User.steam_id)
@@ -399,10 +408,11 @@ class Scoring(commands.Cog):
                 try:
                     #  make sure we have recent games
                     await ingest_user_recent_matches(session, discord_id=int(did), limit=limit)
-
+                    print("ingested")
                     #  aggregate this user's current week from player_games
                     breakdown = await aggregate_week_from_db(session, user_id=uid, week_start_utc=week_start)
-
+                    print("broken down")
+                    print(breakdown)
                     #  compute other_games (anything not in the 4 buckets)
                     sample = breakdown.get("sample_size", 0) or 0
                     mm_g = breakdown.get("mm_games", 0) or 0
@@ -411,7 +421,14 @@ class Scoring(commands.Cog):
                     ren_g = breakdown.get("renown_games", 0) or 0
                     other_games = max(0, int(sample) - int(mm_g + fac_g + prem_g + ren_g))
 
-                    #  upsert into player_stats (ct_rating/t_rating not aggregated here → None)
+                    #  Append discord id if there was no games played
+                    print(sample)
+                    if sample == 0:
+                        skipped_no_games.append(did)
+                        continue
+
+                    print('upserting')
+                    #  upsert into player_stats (ct_rating/t_rating not aggregated here  None)
                     await upsert_stats(
                         session=session,
                         user_id=uid,
@@ -445,15 +462,26 @@ class Scoring(commands.Cog):
 
                     updated += 1
                 except Exception as e:
-                    failed.append((did, str(e)))
-                    print(e)
+                    print(f'Error: {e}')
+                    if "float() argument must be a string or a real number" in str(e) and "NoneType" in str(e):
+                        failed.append('User(s) haven\'t played any games')
+                    #failed.append((did, str(e)))
+                    #print(e)
 
             await session.commit()
 
         msg = f"Updated player_stats & weekly_points for {updated} users (week starting {week_start.date()})."
+        # New messages if people didnt play games
+        if updated == 0 and not failed and skipped_no_games:
+            msg = f"Updated player_stats & weekly_points for 0 users (week starting {week_start.date()}).\nLooks like no one played a game this week yet."
+        elif skipped_no_games:
+            msg += f"\n Skipped (no games): {len(skipped_no_games)}\n" + "\n".join(
+                f"- <@{d}>" for d in skipped_no_games[:6])
         if failed:
-            msg += f"\n {len(failed)} failed:\n" + "\n".join(f"- <@{d}>: {err}" for d, err in failed[:6])
+            msg += f"\n Failed: {failed[:1]}"
+            #msg += f"\n {len(failed)} failed:\n" + "\n".join(f"- <@{d}>: {err}" for d, err in failed[:6])
         await interaction.followup.send(msg, ephemeral=True)
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Scoring(bot))

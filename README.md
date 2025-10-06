@@ -8,7 +8,7 @@
        width="150">
 </a>
 
-MVP Fantasy is a discord based bot that allows the creation of fantasy leagues within a discord server, similiar in nature to Fantasy Premier League.
+MVP Fantasy is a discord based bot that allows the creation of fantasy leagues within a discord server, similiar in nature to [Fantasy Premier League](https://fantasy.premierleague.com/).
 
 ## What the project is
 

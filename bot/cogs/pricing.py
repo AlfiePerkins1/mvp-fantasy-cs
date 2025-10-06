@@ -82,6 +82,9 @@ class Pricing(commands.Cog):
 
         await interaction.followup.send(msg, ephemeral=True)
 
+
+    #TODO:
+    # Update pricing show command to only include players in the same guild
     @pricing.command(name="show", description="List all registered players and their prices (highest to lowest")
     @app_commands.describe(limit="How many players to show (1–50).")
     async def leaderboard(self, interaction: discord.Interaction, limit: int = 20):
