@@ -238,8 +238,8 @@ class Leaderboards(commands.Cog):
             return
 
         # Build a monospace table like your players command
-        header = f"{'#':<2}  {'Team':<24} {'Score':>7}  {'Owner':<24}"
-        sep = f"{'–' * 2}  {'–' * 24} {'–' * 7}  {'–' * 24}"
+        header = f"{'#':<2}  {'Team':<24} {'Score':>7}  {'Owner':<10}"
+        sep = f"{'–' * 2}  {'–' * 24} {'–' * 7}  {'–' * 10}"
         lines = ["```", header, sep]
 
         for rank, row in enumerate(data, start=1):
@@ -251,7 +251,7 @@ class Leaderboards(commands.Cog):
                 owner_str = "@" + owner_name
             else:
                 owner_str = "—"
-            lines.append(f"{rank:<2}  {team:<24} {score:>7}  {owner_str[:24]:<24}")
+            lines.append(f"{rank:<2}  {team:<24} {score:>7}  {owner_str[:24]:<10}")
 
             # Optional: small indented line with top N contributors
             if top > 0 and row["players"]:

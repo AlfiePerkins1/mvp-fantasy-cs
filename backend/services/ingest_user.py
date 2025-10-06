@@ -3,8 +3,8 @@ from backend.services.repo import get_or_create_user
 from backend.services.leetify_api import fetch_recent_matches, parse_finished_at_to_london
 from backend.services.repo_ingest import upsert_match, upsert_player_game
 
-async def ingest_user_recent_matches(session, *, discord_id: int, limit: int = 50) -> dict:
-    user = await get_or_create_user(session, discord_id)
+async def ingest_user_recent_matches(session, *, discord_id: int, guild_id: int, limit: int = 50) -> dict:
+    user = await get_or_create_user(session, discord_id, discord_guild_id=guild_id)
     if not user.steam_id:
         return {"fetched": 0, "inserted": 0, "no_row": 0}
 

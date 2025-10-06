@@ -42,7 +42,7 @@ async def _guild_roster_db_user_ids(session, guild_id: int) -> list[int]:
         if not text.isdigit():
             continue
         discord_id = int(text)
-        user = await get_or_create_user(session, discord_id)
+        user = await get_or_create_user(session, discord_id, discord_guild_id=guild_id)
         if user.id not in seen:
             user_ids.append(user.id)
             seen.add(user.id)
@@ -179,7 +179,7 @@ async def _guild_roster_targets(session, guild_id: int):
         if not s.isdigit():
             continue
         discord_id = int(s)
-        u = await get_or_create_user(session, discord_id)
+        u = await get_or_create_user(session, discord_id, discord_guild_id=guild_id)
         if u.id not in seen:
             seen.add(u.id)
             targets.append((u.id, discord_id))
@@ -270,7 +270,7 @@ class Scoring(commands.Cog):
     scoring = app_commands.Group(name="scoring", description="Configure or view scoring")
 
 
-    @scoring.command(name="update_stats", description="(Admin) Recompute PlayerStats for this server (or one member) from match history")
+    @scoring.command(name="update_stats", description=" DEPRECIATED: USE /stats update_all (Admin) Recompute PlayerStats for this server (or one member) from match history")
     @app_commands.checks.has_permissions(administrator=True)
     @app_commands.describe(member="Only update this member (optional)", fetch="Also fetch new games first")
     async def update_stats(self, interaction: discord.Interaction, member: Optional[discord.User] = None, fetch: bool = True):
@@ -302,7 +302,7 @@ class Scoring(commands.Cog):
             async with session.begin():
                 # build targets
                 if member is not None:
-                    u = await get_or_create_user(session, member.id)
+                    u = await get_or_create_user(session, member.id, discord_guild_id=guild_id)
                     targets = [(u.id, member.id)]
                 else:
                     targets = await _guild_roster_targets(session, guild_id)
@@ -320,13 +320,13 @@ class Scoring(commands.Cog):
                     # fetch new games into PlayerGame (idempotent)
                     if fetch:
                         try:
-                            stats = await ingest_user_recent_matches(session, discord_id=discord_id, limit=100)
+                            stats = await ingest_user_recent_matches(session, discord_id=discord_id, limit=100, guild_id=guild_id)
                             ingested += stats.get("inserted", 0)
                         except Exception as e:
                             print(f"[update_stats] ingest failed for {discord_id}: {e}")
 
                     # aggregate this week from PlayerGame
-                    agg = await _aggregate_ps_from_db(session, user_id=db_user_id, week_start_utc=week_start_utc)
+                    agg = await _aggregate_ps_from_db(session, user_id=db_user_id, week_start_utc=week_start_utc + timedelta(hours=1))
 
                     # upsert PlayerStats (per guild cache)
                     await upsert_stats(
@@ -368,119 +368,7 @@ class Scoring(commands.Cog):
             ephemeral=True
         )
 
-    @scoring.command(name="update_all", description="Update player_stats for all registered users this week")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def update_all(self, interaction: discord.Interaction, limit: int = 100):
-        """
-            Admin Only
 
-            Rebuilds PlayerStats table for all registered users this week (broader than update_stats)
-            Writes:
-                Matches & Player game (refreshed by ingest_user_recent_matches)
-                PlayerStats updated/inserted via upsert stats
-                Does NOT directly update WeeklyPoints (LOOK INTO THIS MIGHT WANNA MAKE IT SO IT DOES)
-
-
-            Use this for a system wide refresh (not limited to people in teams like 'update_stats' command
-
-        """
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        guild_id = interaction.guild_id
-        if not guild_id:
-            await interaction.followup.send("Use this in a server.", ephemeral=True)
-            return
-
-        week_start_london = current_week_start_london()
-        week_start_utc = week_start_london.astimezone(timezone.utc)
-
-        week_start = current_week_start_london()
-        updated, failed = 0, []
-
-        skipped_no_games = []
-
-        async with SessionLocal() as session:
-            users = (await session.execute(
-                select(User.id, User.discord_id, User.steam_id)
-                .where(User.steam_id.is_not(None))
-            )).all()
-
-            for uid, did, steam in users:
-                try:
-                    #  make sure we have recent games
-                    await ingest_user_recent_matches(session, discord_id=int(did), limit=limit)
-                    print("ingested")
-                    #  aggregate this user's current week from player_games
-                    breakdown = await aggregate_week_from_db(session, user_id=uid, week_start_utc=week_start)
-                    print("broken down")
-                    print(breakdown)
-                    #  compute other_games (anything not in the 4 buckets)
-                    sample = breakdown.get("sample_size", 0) or 0
-                    mm_g = breakdown.get("mm_games", 0) or 0
-                    fac_g = breakdown.get("faceit_games", 0) or 0
-                    prem_g = breakdown.get("premier_games", 0) or 0
-                    ren_g = breakdown.get("renown_games", 0) or 0
-                    other_games = max(0, int(sample) - int(mm_g + fac_g + prem_g + ren_g))
-
-                    #  Append discord id if there was no games played
-                    print(sample)
-                    if sample == 0:
-                        skipped_no_games.append(did)
-                        continue
-
-                    print('upserting')
-                    #  upsert into player_stats (ct_rating/t_rating not aggregated here  None)
-                    await upsert_stats(
-                        session=session,
-                        user_id=uid,
-                        guild_id=guild_id,
-                        avg_leetify_rating=breakdown.get("avg_leetify_rating"),
-                        sample_size=sample,
-                        trade_kills=breakdown.get("trade_kills"),
-                        ct_rating=breakdown.get("ct_rating"),
-                        t_rating=breakdown.get("t_rating"),
-                        adr=breakdown.get("adr"),
-                        entries=breakdown.get("entries"),
-                        flashes=breakdown.get("flashes"),
-                        util_dmg=breakdown.get("util_dmg"),
-                        faceit_games=fac_g,
-                        premier_games=prem_g,
-                        renown_games=ren_g,
-                        mm_games=mm_g,
-                        other_games=other_games,
-                        wins=breakdown.get("wins"),
-                    )
-
-                    bd = breakdown_from_agg(breakdown)  # same weights as elsewhere
-                    await upsert_weekly_points_from_breakdown(
-                        session,
-                        week_start_utc=week_start_utc,
-                        guild_id=guild_id,
-                        user_id=uid,
-                        ruleset_id=1,
-                        bd=bd,
-                    )
-
-                    updated += 1
-                except Exception as e:
-                    print(f'Error: {e}')
-                    if "float() argument must be a string or a real number" in str(e) and "NoneType" in str(e):
-                        failed.append('User(s) haven\'t played any games')
-                    #failed.append((did, str(e)))
-                    #print(e)
-
-            await session.commit()
-
-        msg = f"Updated player_stats & weekly_points for {updated} users (week starting {week_start.date()})."
-        # New messages if people didnt play games
-        if updated == 0 and not failed and skipped_no_games:
-            msg = f"Updated player_stats & weekly_points for 0 users (week starting {week_start.date()}).\nLooks like no one played a game this week yet."
-        elif skipped_no_games:
-            msg += f"\n Skipped (no games): {len(skipped_no_games)}\n" + "\n".join(
-                f"- <@{d}>" for d in skipped_no_games[:6])
-        if failed:
-            msg += f"\n Failed: {failed[:1]}"
-            #msg += f"\n {len(failed)} failed:\n" + "\n".join(f"- <@{d}>: {err}" for d, err in failed[:6])
-        await interaction.followup.send(msg, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

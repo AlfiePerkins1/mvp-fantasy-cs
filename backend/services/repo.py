@@ -23,15 +23,24 @@ async def get_or_create_user(
     discord_username: str | None = None,
     discord_global_name: str | None = None,
     discord_display_name: str | None = None,
+    discord_guild_id: int = None,
 ) -> User:
-    res = await session.execute(select(User).where(User.discord_id == discord_id))
+    print("test 1")
+    print(f' Guild: {discord_guild_id}')
+    res = await session.execute(select(User).where(User.discord_id == discord_id, User.discord_guild_id == discord_guild_id))
     user = res.scalar_one_or_none()
 
+    print("test 2")
     if not user:
-        user = User(discord_id=discord_id)
+        print("test 2.5")
+        user = User(discord_id=discord_id,
+                    discord_guild_id = discord_guild_id
+                    )
+        print('test 2.75')
+        print(f'{user}')
         session.add(user)
         await session.flush()
-
+    print("test 3")
     # Update name fields if provided
     if discord_username is not None:
         user.discord_username = discord_username
@@ -39,7 +48,7 @@ async def get_or_create_user(
         user.discord_global_name = discord_global_name
     if discord_display_name is not None:
         user.discord_display_name = discord_display_name
-
+    print("test 4")
     return user
 
 
@@ -59,7 +68,7 @@ async def get_or_create_player(session: AsyncSession, discord_id: int | str):
 
 async def remove_user_steam_id(
     session: AsyncSession, discord_id: int, *, purge_stats: bool = False, guild_id: Optional[int] = None) -> Tuple[User, Optional[str]]:
-    user = await get_or_create_user(session, discord_id)
+    user = await get_or_create_user(session, discord_id, discord_guild_id=guild_id)
     old = user.steam_id
     user.steam_id = None
     await session.flush()
@@ -148,8 +157,8 @@ async def get_or_create_scoring(session: AsyncSession) -> ScoringConfig:
         await session.flush()
     return cfg
 
-async def set_user_steam_id(session: AsyncSession, discord_id: int, steam_id: str) -> User:
-    user = await get_or_create_user(session, discord_id)
+async def set_user_steam_id(session: AsyncSession, discord_id: int, steam_id: str, guild_id: int) -> User:
+    user = await get_or_create_user(session, discord_id, discord_guild_id=guild_id)
     # faceit = await get_faceit_player_by_steam(steam_id)
     user.steam_id = steam_id
     # user.faceit = faceit

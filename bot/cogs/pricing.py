@@ -3,15 +3,15 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from sqlalchemy import select
+from sqlalchemy import select, cast, BigInteger
 from backend.db import SessionLocal
 
 
-from backend.models import Player, User
+from backend.models import Player, User, PlayerStats
 from backend.services.pricing import refresh_one_player, compute_and_persist_prices
 from backend.services.repo import get_or_create_player
 from backend.models import User
-from backend.services.ingest_user import ingest_user_recent_matches
+
 
 
 
@@ -88,6 +88,13 @@ class Pricing(commands.Cog):
     @pricing.command(name="show", description="List all registered players and their prices (highest to lowest")
     @app_commands.describe(limit="How many players to show (1–50).")
     async def leaderboard(self, interaction: discord.Interaction, limit: int = 20):
+        guild_id = interaction.guild_id
+        if not guild_id:
+            await interaction.response.send_message(
+                "This command must be used in a server.", ephemeral=True
+            )
+            return
+
         limit = max(1, min(50, limit))
         await interaction.response.defer(ephemeral=False, thinking=True)
 
@@ -95,7 +102,11 @@ class Pricing(commands.Cog):
         async with SessionLocal() as session:
             result = await session.execute(
                 select(Player.handle, Player.price)
-                .where(Player.price.is_not(None))
+                .join(User, cast(Player.handle, BigInteger) == User.discord_id)  # handle == discord_id
+                .where(
+                    User.discord_guild_id == guild_id,
+                    Player.price.is_not(None),
+                )
                 .order_by(Player.price.desc())
                 .limit(limit)
             )
@@ -149,43 +160,7 @@ class Pricing(commands.Cog):
 
         await interaction.followup.send(f"Sync complete. Added {added} player(s).", ephemeral=True)
 
-    @pricing.command(name="backfill_games", description="Ingest recent matches for all registered users")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def backfill_games(self, interaction: discord.Interaction, limit: int = 100):
-        """
-            Admin Only
-            Fetches and stores recent matches for all registered users
 
-            For each user, runs ingest_user_recent_matches() which gets match data from leetify API
-            Match data then inserted into 'player_games' table (and related tables).
-
-            Writes to: 'match', 'PlayerGame', 'PlayerStats'
-
-            Use to populate historical match data (last 100 games) so player ratings and stats can be calculated.
-
-        """
-        await interaction.response.defer(ephemeral=True, thinking=True)
-
-        async with SessionLocal() as session:
-            users = (await session.execute(
-                select(User.discord_id).where(User.steam_id.is_not(None))
-            )).scalars().all()
-
-            total = 0
-            errors = []
-            for did in users:
-                try:
-                    await ingest_user_recent_matches(session, discord_id=int(did), limit=limit)
-                    total += 1
-                except Exception as e:
-                    errors.append((did, str(e)))
-
-            await session.commit()
-
-        msg = f"Backfill complete. Ingested matches for {total} users."
-        if errors:
-            msg += f"\n{len(errors)} failed:\n" + "\n".join(f"- <@{d}>: {err}" for d, err in errors[:5])
-        await interaction.followup.send(msg, ephemeral=True)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Pricing(bot))

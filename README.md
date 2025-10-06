@@ -43,6 +43,7 @@ MVP Fantasy is a discord based bot that allows the creation of fantasy leagues w
 - Check leaderboard with `/leaderboard show`
 
 - Transfers made apply for the start of the next gameweek (Monday 00:00 UK time)
+  - This means that when first creating a team it **WON'T** be active till next week.
 - Admins can trigger manual recomputations or data refreshes when needed
 
 
@@ -237,4 +238,30 @@ Below shows the `/team show` command with information about this weeks games. Th
 
 ![Team display](images/team_display.PNG "Team display")
 
+
+# F.A.Qs
+
+**Q. Why aren't my recent matches showing up?** <br>
+
+A. Sometimes valve's replay servers take a while to upload games to leetify. If the issue still hasn't resolved itself after 24hours fill out an issue on the github
+
+**Q. Why aren't my faceit games showing?** <br>
+
+A. Due to Faceit demo API not working anymore, faceit games have to be manually uploaded to leetify (Only one person in the game has to do it)
+
+
+
+# Admin Guide
+
+Until I sort out task scheduling to automatically collect game data daily. Commands have to be run manually:
+1. /stats backfill_games 
+   - This collects all games played by users in the server 
+2. /stats update_all
+    - This uses the backfilled games are collates all the stats and converts to weekly points
+
+
+*I recommend running these commands once a day, however they **MUST** be run as close to the week reset as possible to capture all games.*
+
+
 *N.B: Quite a few files are hidden in this Github Repo* 
+

@@ -16,7 +16,7 @@ from backend.db import init_db
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-GUILD_ID = os.getenv("GUILD_ID")  # optional: fast guild-only sync
+GUILD_ID = os.getenv("GUILD_ID") #fast guild-only sync
 GUILD_OBJECT = discord.Object(id=int(GUILD_ID)) if GUILD_ID else None
 
 LOG_FILE = "logs/bot.log"

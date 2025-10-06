@@ -27,12 +27,16 @@ class Account(commands.Cog):
                 Use when first registering with the fantasy bot to link steam and be avaliable
 
 
+                TODO:
+                    Update to hold guild_id, so a user has different accounts across guilds
+
         """
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         member = interaction.user
         discord_id = member.id
         steamid = steamid.strip()
+        guild_id = interaction.guild.id
 
         # grab readable names
         discord_username = member.name
@@ -47,8 +51,9 @@ class Account(commands.Cog):
                     discord_username=discord_username,
                     discord_global_name=discord_global_name,
                     discord_display_name=discord_display_name,
+                    discord_guild_id=guild_id
                 )
-                await set_user_steam_id(session, discord_id, steamid)
+                await set_user_steam_id(session, discord_id, steamid, guild_id=guild_id)
                 player, created = await get_or_create_player(session, discord_id)
 
         exists = await leetify_profile_exists(steamid)
@@ -56,7 +61,7 @@ class Account(commands.Cog):
         if exists is not None:
             async with SessionLocal() as session:
                 async with session.begin():
-                    user = await get_or_create_user(session, discord_id=discord_id)
+                    user = await get_or_create_user(session, discord_id=discord_id, discord_guild_id=guild_id)
                     user.has_leetify = bool(exists)
 
         msg = f"Registered! Linked SteamID `{steamid}` for **{discord_display_name}**."

@@ -3,6 +3,12 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from sqlalchemy.ext.asyncio import AsyncEngine
+
+from sqlalchemy import text
+from backend.db import engine as async_engine
+
+
 def _is_admin_only(cmd: app_commands.Command | app_commands.Group) -> bool:
     dp = getattr(cmd, "default_permissions", None)
     return bool(dp and getattr(dp, "administrator", False))
@@ -86,6 +92,71 @@ class Util(commands.Cog):
         embed.set_footer(text="Admin-only detected via default_permissions(administrator=True).")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
+    @app_commands.command(name="fix_users_schema", description="SQLite: rebuild users for per-guild uniqueness")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def fix_users_schema(self, interaction: discord.Interaction):
+        await interaction.response.send_message("Rebuilding users table…", ephemeral=True)
+
+        engine: AsyncEngine = async_engine
+
+        async with engine.begin() as conn:
+            # turn off FKs temporarily
+            await conn.exec_driver_sql("PRAGMA foreign_keys=OFF;")
+
+            # create new table with correct schema
+            await conn.exec_driver_sql("""
+                                       CREATE TABLE IF NOT EXISTS users_new
+                                       (
+                                           id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                                           discord_id           BIGINT NOT NULL,
+                                           discord_guild_id     BIGINT NOT NULL,
+                                           steam_id             TEXT,
+                                           faceit_id            TEXT,
+                                           discord_username     TEXT,
+                                           discord_global_name  TEXT,
+                                           discord_display_name TEXT,
+                                           has_leetify          BOOLEAN
+                                       );
+                                       """)
+
+            #migrate existing data; put NULL guilds to ligans disc
+            await conn.exec_driver_sql("""
+                                       INSERT INTO users_new (id, discord_id, discord_guild_id, steam_id, faceit_id,
+                                                              discord_username, discord_global_name,
+                                                              discord_display_name, has_leetify)
+                                       SELECT id,
+                                              discord_id,
+                                              COALESCE(discord_guild_id, 1366544715012640798),
+                                              steam_id,
+                                              faceit_id,
+                                              discord_username,
+                                              discord_global_name,
+                                              discord_display_name,
+                                              has_leetify
+                                       FROM users;
+                                       """)
+
+            # swap tables
+            await conn.exec_driver_sql("DROP TABLE users;")
+            await conn.exec_driver_sql("ALTER TABLE users_new RENAME TO users;")
+
+            # indexes/constraints
+            await conn.exec_driver_sql("""
+                                       CREATE UNIQUE INDEX IF NOT EXISTS uq_user_per_guild
+                                           ON users (discord_id, discord_guild_id);
+                                       """)
+            await conn.exec_driver_sql("""
+                                       CREATE INDEX IF NOT EXISTS ix_users_discord_guild
+                                           ON users (discord_id, discord_guild_id);
+                                       """)
+
+            await conn.exec_driver_sql("PRAGMA foreign_keys=ON;")
+
+        await interaction.followup.send("Users table rebuilt with unique(discord_id, discord_guild_id).",
+                                        ephemeral=True)
+
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(Util(bot))
+
 

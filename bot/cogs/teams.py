@@ -71,7 +71,7 @@ class Teams(commands.Cog):
         async with SessionLocal() as session:
             async with session.begin():
                 # fetch or create the user row
-                user = await get_or_create_user(session, interaction.user.id)
+                user = await get_or_create_user(session, interaction.user.id, discord_guild_id=guild_id)
 
                 # check if team already exists for this user in this guild
                 existing = await session.scalar(
@@ -109,13 +109,13 @@ class Teams(commands.Cog):
 
         async with SessionLocal() as session:
             async with session.begin():
-                owner = await get_or_create_user(session, interaction.user.id)
+                owner = await get_or_create_user(session, interaction.user.id, discord_guild_id=guild_id)
                 team = await session.scalar(select(Team).where(Team.owner_id == owner.id, Team.guild_id == guild_id))
                 if not team:
                     await interaction.followup.send("Create a team first: `/team create`", ephemeral=True)
                     return
 
-                target_user = await get_or_create_user(session, member.id)
+                target_user = await get_or_create_user(session, member.id, discord_guild_id=guild_id)
                 if not target_user.steam_id:
                     await interaction.followup.send(
                         f"{member.mention} isn’t registered. Ask them to run `/account register <steamid>` first.",
@@ -214,14 +214,14 @@ class Teams(commands.Cog):
         async with SessionLocal() as session:
             async with session.begin():
                 # Team ownership
-                owner = await get_or_create_user(session, interaction.user.id)
+                owner = await get_or_create_user(session, interaction.user.id, discord_guild_id=guild_id)
                 team = await session.scalar(select(Team).where(Team.owner_id == owner.id, Team.guild_id == guild_id))
                 if not team:
                     await interaction.followup.send("Create a team first: `/team create`", ephemeral=True)
                     return
 
                 # Ensure Player row exists
-                target_user = await get_or_create_user(session, member.id)
+                target_user = await get_or_create_user(session, member.id, discord_guild_id=guild_id)
                 player_row = await ensure_player_for_user(session, target_user)
 
                 # Time keys
@@ -315,7 +315,8 @@ class Teams(commands.Cog):
         async with SessionLocal() as session:
             async with session.begin():
                 # Lookup the owner’s DB user row
-                target_db_user = await get_or_create_user(session, target_user.id)
+
+                target_db_user = await get_or_create_user(session, target_user.id, discord_guild_id=guild_id)
 
                 # Find their team in this guild
                 row = await session.execute(
@@ -338,6 +339,14 @@ class Teams(commands.Cog):
                 next_week = next_week_start_norm(now)
 
                 selected_week = next_week if week == 2 else this_week
+
+                selected_week_key = (
+                    selected_week
+                    .astimezone(timezone.utc)
+                    .replace(minute=0, second=0, microsecond=0, tzinfo=None)  # <-- snap 00:01 → 00:00, naive UTC
+                )
+
+                print(f'Selected week: {selected_week}')
                 label = "Next Week" if week == 2 else "This Week"
 
                 # Budget / transfers state for the selected week
@@ -382,7 +391,7 @@ class Teams(commands.Cog):
                         display_name = escape_mentions(display_name)
 
                         # Fetch PlayerStats (cached averages)
-                        member_row = await get_or_create_user(session, user_id_num)
+                        member_row = await get_or_create_user(session, user_id_num, discord_guild_id=guild_id)
                         db_user_id = member_row.id
 
                         stats_row = await session.scalar(
@@ -400,7 +409,7 @@ class Teams(commands.Cog):
                             .where(
                                 WeeklyPoints.user_id == db_user_id,
                                 WeeklyPoints.guild_id == guild_id,
-                                WeeklyPoints.week_start == selected_week,  # <-- exact week we’re showing
+                                WeeklyPoints.week_start == selected_week_key,  #  exact week we’re showing (replaced 00:01 to 00:00)
                             )
                             .limit(1)
                         )
