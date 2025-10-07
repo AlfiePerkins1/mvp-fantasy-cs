@@ -13,6 +13,8 @@ async def ingest_user_recent_matches(session, *, discord_id: int, guild_id: int,
     inserted = 0
     no_row = 0
 
+    print(f' User {user.steam_id} has {fetched} matches')
+
     for m in matches:
         match_id = await upsert_match(session, m)
         row = next((s for s in (m.get("stats") or []) if str(s.get("steam64_id")) == str(user.steam_id)), None)
@@ -28,6 +30,8 @@ async def ingest_user_recent_matches(session, *, discord_id: int, guild_id: int,
             m=m,
         )
         inserted += 1
+        print(f' Appended {inserted} matches to database, with ID: {match_id}')
+        print(f' Row: {row}')
 
     await session.flush()
     return {"fetched": fetched, "inserted": inserted, "no_row": no_row}

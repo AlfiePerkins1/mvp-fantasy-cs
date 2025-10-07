@@ -4,10 +4,11 @@ from discord.ext import commands
 
 
 from datetime import datetime, timezone, timedelta
-
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, case, func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.dialects import sqlite
 
 from backend.db import SessionLocal
 from backend.services.leetify_api import current_week_start_london
@@ -69,54 +70,95 @@ def breakdown_from_agg(a: dict, *, alpha=10.0, k=0.60, cap=1.15) -> dict:
 def _v(x, d=0.0): return float(x) if x is not None else float(d)
 def _i(x, d=0):   return int(x) if x is not None else int(d)
 
+def week_bounds_naive_utc(tz_name="Europe/London"):
+    now_local = datetime.now(ZoneInfo(tz_name))
+    start_local = (now_local - timedelta(days=now_local.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    end_local = start_local + timedelta(days=7)
+    start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)
+    end_utc   = end_local.astimezone(timezone.utc).replace(tzinfo=None)
+    return start_utc, end_utc
 
-async def aggregate_week_from_db(session, *, user_id: int, week_start_utc: datetime) -> dict:
-    """Aggregate this user's week from PlayerGame."""
+async def aggregate_week_from_db(
+    session,
+    *,
+    user_id: int | None = None,
+    steam_id: int | None = None,
+    week_start_utc,                 # UTC-naive datetime
+    week_end_utc=None               # optional UTC-naive datetime
+) -> dict:
+    assert (user_id is not None) ^ (steam_id is not None), "Pass exactly one of user_id or steam_id"
+    if week_end_utc is None:
+        week_end_utc = week_start_utc + timedelta(days=7)
+
+    # sanity: your DB column is naive → bounds must be naive
+    if getattr(week_start_utc, "tzinfo", None) is not None or getattr(week_end_utc, "tzinfo", None) is not None:
+        raise ValueError("Pass UTC-naive week bounds")
+
     PG = PlayerGame
-    week_end_utc = week_start_utc + timedelta(days=7)
+    id_filter = (PG.user_id == user_id) if user_id is not None else (PG.steam_id == steam_id)
 
-    res = (await session.execute(
+    stmt = (
         select(
-            func.count(PG.id),                                    # games
-            func.avg(PG.leetify_rating * 100.0),                  # avg rating 0..100
-            func.sum(PG.trade_kills_succeed),                     # total trades
-            func.avg(PG.dpr),                                     # ADR avg
-            func.sum(PG.flashbang_leading_to_kill),               # flashes total
-            func.avg(PG.he_foes_damage_avg),                      # util avg
-            func.avg(PG.ct_leetify_rating * 100),
-            func.avg(PG.t_leetify_rating * 100),
+            func.count(PG.id).label("sample_size"),
+            func.avg(PG.leetify_rating * 100.0).label("avg_leetify_rating"),
+            func.sum(PG.trade_kills_succeed).label("trade_kills"),
+            func.avg(PG.dpr).label("adr"),
+            func.sum(PG.flashbang_leading_to_kill).label("flashes"),
+            func.avg(PG.he_foes_damage_avg).label("util_dmg"),
+            func.avg(PG.ct_leetify_rating * 100).label("ct_rating"),
+            func.avg(PG.t_leetify_rating * 100).label("t_rating"),
+            func.sum(case((PG.won.is_(True), 1), else_=0)).label("wins"),
 
-            func.sum(case((PG.won == True, 1), else_=0)),         # wins
-            func.sum(case((PG.data_source == "matchmaking", 1), else_=0)),
-            func.sum(case((PG.data_source == "faceit", 1), else_=0)),
-            func.sum(case((PG.data_source == "renown", 1), else_=0)),
-            func.sum(case((PG.data_source == "matchmaking_competitive", 1), else_=0)),
+            # Buckets — EXACT mapping
+            func.sum(case((PG.data_source == "matchmaking_competitive", 1), else_=0)).label("premier_games"),
+            func.sum(case((PG.data_source == "matchmaking", 1), else_=0)).label("mm_games"),
+            func.sum(case((PG.data_source == "faceit", 1), else_=0)).label("faceit_games"),
+            func.sum(case((PG.data_source == "renown", 1), else_=0)).label("renown_games"),
         )
         .where(
-            PG.user_id == user_id,
+            id_filter,
             PG.finished_at >= week_start_utc,
             PG.finished_at <  week_end_utc,
         )
-    )).one()
+    )
+    print("STMT (literal):")
+    print(stmt.compile(dialect=sqlite.dialect(), compile_kwargs={"literal_binds": True}))
 
-    (games, avg_rating, trades, adr, flashes, util,ct_rating, t_rating, wins, n_p, n_f, n_r, n_m) = res
-    print(res)
-    return {
-        "sample_size": _i(games),
-        "avg_leetify_rating": _v(avg_rating, None),
-        "trade_kills": _i(trades),
-        "adr": _v(adr, None),
-        "flashes": _i(flashes),
-        "util_dmg": _v(util, None),
-        "ct_rating": _v(ct_rating, None),
-        "t_rating": _v(t_rating, None),
-        "wins": _i(wins),
-        "premier_games": _i(n_p),
-        "faceit_games": _i(n_f),
-        "renown_games": _i(n_r),
-        "mm_games": _i(n_m),
-        "entries": 0.0,  # until API exposes it
+
+    res = await session.execute(stmt)
+    m = res.mappings().one()  # RowMapping (immutable)
+
+    # Build a normal dict with safe coercions
+    sample_size = int(m["sample_size"] or 0)
+
+    row = {
+        "sample_size": sample_size,
+        "avg_leetify_rating": (m["avg_leetify_rating"] if sample_size > 0 else None),
+        "trade_kills": int(m["trade_kills"] or 0),
+        "adr": (m["adr"] if sample_size > 0 else None),
+        "flashes": int(m["flashes"] or 0),
+        "util_dmg": (m["util_dmg"] if sample_size > 0 else None),
+        "ct_rating": (m["ct_rating"] if sample_size > 0 else None),
+        "t_rating": (m["t_rating"] if sample_size > 0 else None),
+        "wins": int(m["wins"] or 0),
+
+        # Buckets: Premier/MM/Faceit/Renown as you specified
+        "premier_games": int(m["premier_games"] or 0),
+        "mm_games": int(m["mm_games"] or 0),
+        "faceit_games": int(m["faceit_games"] or 0),
+        "renown_games": int(m["renown_games"] or 0),
     }
+
+    row["other_games"] = max(
+        0,
+        sample_size
+        - row["premier_games"] - row["mm_games"]
+        - row["faceit_games"] - row["renown_games"]
+    )
+    row.setdefault("entries", 0.0)
+    return row
 
 async def upsert_weekly_points_from_breakdown(session, *, week_start_utc: datetime, guild_id: int, user_id: int, ruleset_id: int, bd: dict):
     stmt = sqlite_insert(WeeklyPoints).values(
@@ -216,6 +258,9 @@ class stats(commands.Cog):
         week_start = current_week_start_london()
         updated, failed = 0, []
 
+        week_start_utc_naive, week_end_utc_naive = week_bounds_naive_utc()
+        week_start_local_str = week_start_utc_naive.strftime("%d-%b-%Y")
+
         skipped_no_games = []
 
         async with SessionLocal() as session:
@@ -223,14 +268,17 @@ class stats(commands.Cog):
                 select(User.id, User.discord_id, User.steam_id)
                 .where(User.steam_id.is_not(None))
             )).all()
+            print('test')
+            print(f'users: {len(users)}')
 
             for uid, did, steam in users:
                 try:
                     #  make sure we have recent games
                     await ingest_user_recent_matches(session, discord_id=int(did), limit=limit, guild_id=guild_id)
                     print("ingested")
+                    print(f'uid: {uid}')
                     #  aggregate this user's current week from player_games
-                    breakdown = await aggregate_week_from_db(session, user_id=uid, week_start_utc=week_start)
+                    breakdown = await aggregate_week_from_db(session, steam_id=steam, week_start_utc=week_start_utc_naive)
                     print("broken down")
                     print(breakdown)
                     #  compute other_games (anything not in the 4 buckets)
@@ -269,7 +317,7 @@ class stats(commands.Cog):
                         other_games=other_games,
                         wins=breakdown.get("wins"),
                     )
-
+                    print(f' Breaking down')
                     bd = breakdown_from_agg(breakdown)  # same weights as elsewhere
                     await upsert_weekly_points_from_breakdown(
                         session,
@@ -292,11 +340,10 @@ class stats(commands.Cog):
                         failed.append((did, error_msg))
 
             await session.commit()
-
-        msg = f"Updated player_stats & weekly_points for {updated} users (week starting {week_start.date()})."
+        msg = f"Updated player_stats & weekly_points for {updated} users (week starting {week_start.strftime("%d-%b-%Y")})."
         # New messages if people didnt play games
         if updated == 0 and not failed and skipped_no_games:
-            msg = f"Updated player_stats & weekly_points for 0 users (week starting {week_start.date()}).\nLooks like no one played a game this week yet."
+            msg = f"Updated player_stats & weekly_points for 0 users (week starting {week_start.strftime("%d-%b-%Y")}).\nLooks like no one played a game this week yet."
         elif skipped_no_games:
             msg += f"\n Skipped (no games): {len(skipped_no_games)}\n" + "\n".join(
                 f"- <@{d}>" for d in skipped_no_games[:6])
