@@ -2,8 +2,12 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
+
+
 from typing import Optional
 from sqlalchemy import select, func, or_
+from sqlalchemy.exc import IntegrityError
+
 from discord.utils import escape_mentions
 from datetime import timedelta, timezone, datetime
 from backend.db import SessionLocal
@@ -460,6 +464,72 @@ class Teams(commands.Cog):
         embed.set_footer(text="Players shown are those whose [from, to) interval covers this gameweek.")
 
         await interaction.followup.send(embed=embed, allowed_mentions=NO_PINGS)
+
+    @team.command(name="change_name", description="Change the name of your team")
+    @app_commands.describe(new_name="The name of the team")
+    async def team_change_name(self, interaction: discord.Interaction, new_name: str):
+        guild_id = interaction.guild_id
+        if not guild_id:
+            await interaction.response.send_message("Use this command in a server.", ephemeral=True)
+            return
+
+        # normalize input and set max length
+        MAX_TEAM_NAME = 64
+        name = " ".join(new_name.strip().split())  # trim + collapse spaces
+        if not name:
+            await interaction.response.send_message("Team name cannot be empty.", ephemeral=True)
+            return
+        if len(name) > MAX_TEAM_NAME:
+            await interaction.response.send_message(f"Team name must be ≤ {MAX_TEAM_NAME} characters.", ephemeral=True)
+            return
+
+        async with SessionLocal() as session:
+            async with session.begin():
+                # fetch the caller's team in this guild
+                user = await get_or_create_user(session, interaction.user.id, discord_guild_id=guild_id)
+                team = await session.scalar(
+                    select(Team).where(Team.owner_id == user.id, Team.guild_id == guild_id)
+                )
+                if team is None:
+                    await interaction.response.send_message("You don't have a team in this server.", ephemeral=True)
+                    return
+
+                # dont change if unchanged
+                if team.name == name:
+                    await interaction.response.send_message(f"Your team is already named **{name}**.", ephemeral=True)
+                    return
+
+                # pre-check to avoid IntegrityError message (it should never occur but idk)
+                taken = await session.scalar(
+                    select(func.count())
+                    .select_from(Team)
+                    .where(
+                        Team.guild_id == guild_id,
+                        func.lower(Team.name) == name.lower(),
+                        Team.id != team.id,
+                    )
+                )
+                if taken:
+                    await interaction.response.send_message("That team name is already taken in this server.",
+                                                            ephemeral=True)
+                    return
+
+                # update
+                team.name = name
+                try:
+                    # session.begin() will commit
+                    pass
+                except IntegrityError:
+                    await session.rollback()
+                    await interaction.response.send_message("That team name is already taken in this server.",
+                                                            ephemeral=True)
+                    return
+
+        await interaction.response.send_message(f"Team renamed to **{name}**.")
+
+
+
+
 
 
 async def setup(bot: commands.Bot):
