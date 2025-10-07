@@ -284,3 +284,13 @@ Until I sort out task scheduling to automatically collect game data daily. Comma
 
 *N.B: Quite a few files are hidden in this Github Repo* 
 
+
+### Coming Soon
+
+- Embed Scrolling
+  - Multiple pages of player prices
+  - Multiple pages of leaderboards
+  - Ability to view past leaderboards
+
+- Price filtering
+  - Filter prices to only show players you can afford
