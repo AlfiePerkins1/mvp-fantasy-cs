@@ -51,15 +51,21 @@ def _price_from_percentile(p: float) -> int:
 
 
 async def refresh_one_player(session, discord_id: str) -> dict:
+    print(f' Discord ID being used: {discord_id}')
     u = await session.scalar(select(User).where(User.discord_id == str(discord_id)))
     if not u:
+        print(f' Failed for Discord ID: {discord_id}')
         return {"discord_id": discord_id, "ok": False, "reason": "no_user"}
 
     profile = await fetch_profile(u.steam_id)
     ranks = extract_ranks(profile) if profile else {
         "renown_elo": None, "premier_elo": None, "faceit_elo": None
     }
+    print(ranks)
+
     l100 = await leetify_l100_avg(session, u.id)
+
+    print(l100)
 
     ok = await upsert_player_ratings_and_l100(
         session, str(discord_id),

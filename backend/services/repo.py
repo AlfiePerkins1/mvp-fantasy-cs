@@ -292,14 +292,25 @@ async def player_by_handle(session, discord_id: int | str):
 
 
 async def leetify_l100_avg(session, user_id: int):
+
+    steam = await session.scalar(
+        select(User.steam_id).where(User.id == user_id)
+    )
+    if not steam:
+        return None
+
     q = (
         select(PlayerGame.leetify_rating)
-        .where(PlayerGame.user_id == user_id)
+        .where(PlayerGame.steam_id == steam, PlayerGame.leetify_rating.isnot(None))
         .order_by(PlayerGame.finished_at.desc())
         .limit(100)
     )
+    #print('User ID being used:', user_id)
     result = await session.execute(q)
+
+    #print(f'Result: {result}')
     rows = [r[0] for r in result.all() if r[0] is not None]
+    #print(f'Rows: {rows}')
     if rows:
         return float(sum(rows) / len(rows))
 
