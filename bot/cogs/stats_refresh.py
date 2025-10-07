@@ -174,7 +174,12 @@ class stats(commands.Cog):
                     await ingest_user_recent_matches(session, discord_id=int(did), limit=limit, guild_id=guild_id)
                     total += 1
                 except Exception as e:
-                    errors.append((did, str(e)))
+                    error_msg = str(e)
+
+                    if "404 Not Found" in error_msg:
+                        errors.append((did, "doesn’t have a Leetify profile"))
+                    else:
+                        errors.append((did, error_msg))
 
             await session.commit()
 
@@ -277,11 +282,14 @@ class stats(commands.Cog):
 
                     updated += 1
                 except Exception as e:
-                    print(f'Error: {e}')
-                    if "float() argument must be a string or a real number" in str(e) and "NoneType" in str(e):
-                        failed.append('User(s) haven\'t played any games')
-                    # failed.append((did, str(e)))
-                    # print(e)
+                    error_msg = str(e)
+                    print(error_msg)
+                    if "float() argument must be a string" in error_msg:
+                        failed.append((did, "hasn't played any games this week!"))
+                    elif "404 Not Found" in error_msg:
+                        failed.append((did, "doesn’t have a Leetify profile"))
+                    else:
+                        failed.append((did, error_msg))
 
             await session.commit()
 
@@ -293,8 +301,8 @@ class stats(commands.Cog):
             msg += f"\n Skipped (no games): {len(skipped_no_games)}\n" + "\n".join(
                 f"- <@{d}>" for d in skipped_no_games[:6])
         if failed:
-            msg += f"\n Failed: {failed[:1]}"
-            # msg += f"\n {len(failed)} failed:\n" + "\n".join(f"- <@{d}>: {err}" for d, err in failed[:6])
+            # msg += f"\n Failed: {failed[:1]}"
+            msg += f"\n {len(failed)} failed:\n" + "\n".join(f"- <@{d}>: {err}" for d, err in failed[:6])
         await interaction.followup.send(msg, ephemeral=True)
 
 
