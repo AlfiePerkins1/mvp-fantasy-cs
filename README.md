@@ -266,7 +266,9 @@ A. Sometimes valve's replay servers take a while to upload games to leetify. If 
 
 A. Due to Faceit demo API not working anymore, faceit games have to be manually uploaded to leetify (Only one person in the game has to do it)
 
+**Q. Why does it say `The application did not respond`?**
 
+A. This is caused by the bot being offline. It's either because im actively testing or my PC crashed. It will be fixed as soon as possible.
 
 # Admin Guide
 

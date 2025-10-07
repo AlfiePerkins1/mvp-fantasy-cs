@@ -270,7 +270,7 @@ class Scoring(commands.Cog):
     scoring = app_commands.Group(name="scoring", description="Configure or view scoring")
 
 
-    @scoring.command(name="update_stats", description=" DEPRECIATED: USE /stats update_all (Admin) Recompute PlayerStats for this server (or one member) from match history")
+    @scoring.command(name="update_stats", description=" DEPRECIATED: USE /stats update_all ")
     @app_commands.checks.has_permissions(administrator=True)
     @app_commands.describe(member="Only update this member (optional)", fetch="Also fetch new games first")
     async def update_stats(self, interaction: discord.Interaction, member: Optional[discord.User] = None, fetch: bool = True):

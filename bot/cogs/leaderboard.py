@@ -68,8 +68,13 @@ class Leaderboards(commands.Cog):
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=False)
 
-        # last 7 days window (robust against DATE/DATETIME mismatch)
+        # last 7 days window
         since_dt = datetime.now(timezone.utc) - timedelta(days=7)
+        week_norm = current_week_start_norm(datetime.now())
+        print(week_norm)
+        week_norm = week_norm - timedelta(minutes=1)
+        print(week_norm)
+
         limit = max(1, min(int(limit), 25))
 
         # pull top N — LEFT JOIN so a missing User row doesn't drop the score
@@ -84,7 +89,7 @@ class Leaderboards(commands.Cog):
                     .join(User, User.id == WeeklyPoints.user_id, isouter=True)
                     .where(
                         WeeklyPoints.guild_id == guild_id,
-                        WeeklyPoints.week_start >= since_dt,
+                        WeeklyPoints.week_start == week_norm,
                         WeeklyPoints.weekly_score.isnot(None),
                     )
                     .order_by(WeeklyPoints.weekly_score.desc())
@@ -93,7 +98,7 @@ class Leaderboards(commands.Cog):
 
         if not rows:
             await interaction.followup.send(
-               f"No scores since {since_dt} days. Run `\\pricing backfill_games` and `\\scoring update_all` (Admin Only) ",
+               f"No scores since {week_norm} days. Run `\\pricing backfill_games` and `\\scoring update_all` (Admin Only) ",
                 allowed_mentions=NO_PINGS,
             )
             return
@@ -119,71 +124,12 @@ class Leaderboards(commands.Cog):
         lines.append("```")
 
         embed = discord.Embed(
-            title="Leaderboard — Last 7 Days",
+            title="Leaderboard — Current ranking period",
             description="\n".join(lines),
             type="rich",
         )
         await interaction.followup.send(embed=embed, allowed_mentions=NO_PINGS)
 
-        async def build_embed(self, interaction: discord.Interaction) -> discord.Embed:
-            offset = (self.page - 1) * self.limit
-            async with self.bot.session_maker() as session:  # type: AsyncSession
-                data = await get_team_leaderboard(
-                    session=session,
-                    guild_id=interaction.guild_id,
-                    week_start_norm=self.week_norm,
-                    limit=self.limit,
-                    offset=offset,
-                )
-
-                # Map user_id -> discord_id for contributor mentions
-                user_ids = {uid for row in data for (uid, _) in row["players"]}
-                uid_to_discord = {}
-                if user_ids:
-                    res = await session.execute(
-                        select(User.id, User.discord_id).where(User.id.in_(user_ids))
-                    )
-                    uid_to_discord = dict(res.tuples().all())
-
-            ws_label = self.week_norm.strftime("%Y-%m-%d")
-            embed = discord.Embed(
-                title=f"Team Leaderboard — Week starting {ws_label}",
-                color=discord.Color.gold(),
-            )
-
-            if not data:
-                embed.description = "No teams found for this page."
-                return embed
-
-            lines = []
-            rank_start = offset + 1
-            for i, row in enumerate(data, start=rank_start):
-                owner_tag = f" • Owner: <@{row['owner_discord_id']}>" if row.get("owner_discord_id") else ""
-                lines.append(f"**{i}. {row['team_name']}** — {row['points']:.1f} pts{owner_tag}")
-
-                # top 3 contributors
-                if row["players"]:
-                    top = []
-                    for (uid, pts) in row["players"][:3]:
-                        mention = f"<@{uid_to_discord.get(uid, 0)}>" if uid_to_discord.get(uid) else f"User {uid}"
-                        top.append(f"{mention} {pts:.1f}")
-                    lines.append("   · Top: " + ", ".join(top))
-
-            embed.description = "\n".join(lines)
-            return embed
-
-        @discord.ui.button(label="Prev", style=discord.ButtonStyle.secondary)
-        async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-            if self.page > 1:
-                self.page -= 1
-            embed = await self.build_embed(interaction)
-            await interaction.response.edit_message(embed=embed, view=self)
-
-        @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
-        async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-            self.page += 1
-            embed = await self.build_embed(interaction)
-            await interaction.response.edit_message(embed=embed, view=self)
 
     @leaderboard.command(name="teams", description="Show this week's team leaderboard")
     @app_commands.describe(limit="Number of teams to show (max 25)",
