@@ -93,7 +93,7 @@ async def compute_and_persist_prices(session) -> List[Dict]:
     if not rows:
         return []
 
-    # build skill scores (no early returns here)
+    # build skill scores
     scored: List[tuple[int, float, str]] = []  # (player_id, score, handle)
     for pid, handle, faceit, premier, renown, l100 in rows:
         leetify_norm = _norm_leetify(l100)

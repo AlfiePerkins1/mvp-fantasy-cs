@@ -277,7 +277,7 @@ class stats(commands.Cog):
         failed: list[tuple[int, str]] = []  # (discord_id or steam, error)
 
         async with SessionLocal() as session:
-            # 1) pick users in-scope
+            # pick users in-scope
             q = select(User.id, User.discord_id, User.steam_id, User.discord_guild_id).where(
                 User.steam_id.is_not(None)
             )
@@ -290,7 +290,7 @@ class stats(commands.Cog):
                 await interaction.followup.send(f"No registered users with Steam IDs in {scope}.", ephemeral=True)
                 return
 
-            # 2) ingest once per unique steam
+            #ingest once per unique steam
             unique_steams = {int(s) for _, _, s, _ in users if s is not None}
             for steam in unique_steams:
                 try:
@@ -299,7 +299,7 @@ class stats(commands.Cog):
                     # keep going; we can still aggregate what we have
                     failed.append((steam, f"ingest: {e}"))
 
-            # 3) aggregate per user/guild and upsert
+            #aggregate per user/guild and upsert
             for uid, did, steam, user_guild_id in users:
                 try:
                     if steam is None:

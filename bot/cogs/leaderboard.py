@@ -7,7 +7,7 @@ from typing import Optional
 from backend.db import SessionLocal
 
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, func, and_
 from sqlalchemy.sql import func as sqlfunc
 from zoneinfo import ZoneInfo
 
@@ -54,61 +54,101 @@ class Leaderboards(commands.Cog):
     leaderboard = app_commands.Group(name="leaderboard", description="Configure or view leaderboard")
 
     @leaderboard.command(name="player", description="Show this week's players leaderboard")
-    async def player(self, interaction: discord.Interaction, limit: int = 10):
-        """
-            Displays the top players in the server based on fantasy points scored in the last 7 days.
-            Reads Weekly_points table and filters rows so the week start is >= today - 7 days, the players are in this
-            server and not another, and weekly score isnt null
-
-            Use to check the current individual fantasy leaderboard for the past week.
-
-        """
-
+    @app_commands.describe(
+        limit="How many players to show (max 25)",
+        all_guilds="Include players from ALL guilds (default: only this server)",
+    )
+    async def player(self, interaction: discord.Interaction, limit: int = 10, all_guilds: bool = False):
         guild = interaction.guild
         guild_id = interaction.guild_id
-        if not guild_id:
-            await interaction.response.send_message("Use this in a server (not DMs).", ephemeral=True)
+        if not guild_id and not all_guilds:
+            await interaction.response.send_message("Use this in a server (or pass all_guilds=True).", ephemeral=True)
             return
 
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=False)
 
-        # last 7 days window
-
-
-        since_dt = datetime.now(timezone.utc) - timedelta(days=7)
-        week_norm = current_week_start_norm(datetime.now())
-        print(week_norm)
-        week_norm = week_norm - timedelta(minutes=1)
-        print(week_norm)
-
+        # same week key you already use
+        week_norm = current_week_start_norm(datetime.now()) - timedelta(minutes=1)
         limit = max(1, min(int(limit), 25))
 
-        # pull top N — LEFT JOIN so a missing User row doesn't drop the score
         async with SessionLocal() as session:
             async with session.begin():
-                rows = (await session.execute(
-                    select(
-                        WeeklyPoints.user_id,
-                        WeeklyPoints.weekly_score,
-                        User.discord_id,
+                if not all_guilds:
+                    # Latest row per *user* in THIS guild
+                    latest = (
+                        select(
+                            WeeklyPoints.user_id,
+                            func.max(WeeklyPoints.computed_at).label("latest_ts"),
+                        )
+                        .where(
+                            WeeklyPoints.guild_id == guild_id,
+                            WeeklyPoints.week_start == week_norm,
+                            WeeklyPoints.weekly_score.isnot(None),
+                            WeeklyPoints.computed_at.isnot(None),
+                        )
+                        .group_by(WeeklyPoints.user_id)
+                    ).subquery()
+
+                    q = (
+                        select(
+                            WeeklyPoints.user_id,
+                            WeeklyPoints.weekly_score,
+                            User.discord_id,
+                        )
+                        .join(latest, and_(
+                            WeeklyPoints.user_id == latest.c.user_id,
+                            WeeklyPoints.computed_at == latest.c.latest_ts,
+                        ))
+                        .join(User, User.id == WeeklyPoints.user_id, isouter=True)
+                        .order_by(WeeklyPoints.weekly_score.desc())
+                        .limit(limit * 2)
                     )
-                    .join(User, User.id == WeeklyPoints.user_id, isouter=True)
-                    .where(
-                        WeeklyPoints.guild_id == guild_id,
-                        WeeklyPoints.week_start == week_norm,
-                        WeeklyPoints.weekly_score.isnot(None),
+                    raw = (await session.execute(q)).all()
+                    rows = [(did, score) for (_uid, score, did) in raw]
+
+                else:
+                    # ALL guilds: dedupe by *discord_id* (a user can exist in multiple guilds)
+                    base = (
+                        select(
+                            User.discord_id.label("discord_id"),
+                            WeeklyPoints.weekly_score.label("score"),
+                            func.row_number().over(
+                                partition_by=User.discord_id,
+                                order_by=WeeklyPoints.computed_at.desc(),
+                            ).label("rn"),
+                        )
+                        .join(User, User.id == WeeklyPoints.user_id)
+                        .where(
+                            WeeklyPoints.week_start == week_norm,
+                            WeeklyPoints.weekly_score.isnot(None),
+                            WeeklyPoints.computed_at.isnot(None),
+                        )
+                    ).subquery()
+
+                    q = (
+                        select(base.c.discord_id, base.c.score)
+                        .where(base.c.rn == 1)
+                        .order_by(base.c.score.desc())
+                        .limit(limit * 2)
                     )
-                    .order_by(WeeklyPoints.weekly_score.desc())
-                    .limit(limit)
-                )).all()
+                    rows = (await session.execute(q)).all()  # [(discord_id, score)]
 
         if not rows:
             await interaction.followup.send(
-               f"No scores since {week_norm} days. Run `\\pricing backfill_games` and `\\scoring update_all` (Admin Only) ",
-                allowed_mentions=NO_PINGS,
+                f"No scores for week starting {week_norm:%Y-%m-%d}.", allowed_mentions=NO_PINGS
             )
             return
+
+        # Final safety dedupe by discord_id, then cap to limit
+        seen, unique = set(), []
+        for did, score in rows:
+            if did is None or did in seen:
+                continue
+            seen.add(did)
+            unique.append((did, score))
+            if len(unique) >= limit:
+                break
 
         def fmt_1dp(x) -> str:
             try:
@@ -120,18 +160,16 @@ class Leaderboards(commands.Cog):
         sep = f"{'–' * 2}  {'–' * 24} {'–' * 7}"
         lines = ["```", header, sep]
 
-        for rank, (user_id, score, discord_id) in enumerate(rows, start=1):
-            if discord_id:
-                name = await _resolve_display_name_quick(guild, int(discord_id), fallback=str(discord_id))
-                name = "@" + escape_mentions(name)
-            else:
-                name = f"User {user_id}"
+        for rank, (discord_id, score) in enumerate(unique, start=1):
+            name = await _resolve_display_name_quick(guild, int(discord_id), fallback=str(discord_id))
+            name = "@" + escape_mentions(name)
             lines.append(f"{rank:<2}  {name[:24]:<24} {fmt_1dp(score):>7}")
 
         lines.append("```")
 
+        scope_title = "All Guilds" if all_guilds else "Current Server"
         embed = discord.Embed(
-            title="Leaderboard — Current ranking period",
+            title=f"Leaderboard — {scope_title}",
             description="\n".join(lines),
             type="rich",
         )

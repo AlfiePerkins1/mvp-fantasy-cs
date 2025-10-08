@@ -33,6 +33,11 @@ class Account(commands.Cog):
         """
         await interaction.response.defer(ephemeral=True, thinking=True)
 
+
+        if "STEAM" in steamid:
+            interaction.followup.send("You used the wrong type of SteamID! It's steam 64 like this: 76561198259409483")
+            return
+
         member = interaction.user
         discord_id = member.id
         steamid = steamid.strip()
