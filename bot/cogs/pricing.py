@@ -86,13 +86,13 @@ class Pricing(commands.Cog):
     #TODO:
     # Update pricing show command to only include players in the same guild
     @pricing.command(name="show", description="List all registered players and their prices (highest to lowest")
-    @app_commands.describe(limit="How many players to show (1–50).")
-    async def leaderboard(self, interaction: discord.Interaction, limit: int = 20):
+    @app_commands.describe(limit="How many players to show (1–50).", all_guilds="Include players from ALL guilds (default: only this server)")
+    async def leaderboard(self, interaction: discord.Interaction, limit: int = 20, all_guilds: bool = False):
+
+        guild = interaction.guild
         guild_id = interaction.guild_id
-        if not guild_id:
-            await interaction.response.send_message(
-                "This command must be used in a server.", ephemeral=True
-            )
+        if not guild_id and not all_guilds:
+            await interaction.response.send_message("Use this in a server (or pass all_guilds=True).", ephemeral=True)
             return
 
         limit = max(1, min(50, limit))
@@ -100,17 +100,30 @@ class Pricing(commands.Cog):
 
         # fetch top N by price (ignore NULLs)
         async with SessionLocal() as session:
-            result = await session.execute(
-                select(Player.handle, Player.price)
-                .join(User, cast(Player.handle, BigInteger) == User.discord_id)  # handle == discord_id
-                .where(
-                    User.discord_guild_id == guild_id,
-                    Player.price.is_not(None),
+
+            if not all_guilds:
+
+                result = await session.execute(
+                    select(Player.handle, Player.price)
+                    .join(User, cast(Player.handle, BigInteger) == User.discord_id)  # handle == discord_id
+                    .where(
+                        User.discord_guild_id == guild_id,
+                        Player.price.is_not(None),
+                    )
+                    .order_by(Player.price.desc())
+                    .limit(limit)
                 )
-                .order_by(Player.price.desc())
-                .limit(limit)
-            )
-            rows = result.all()
+                rows = result.all()
+            else:
+                result = await session.execute(
+                    select(Player.handle, Player.price)
+                    .join(User, cast(Player.handle, BigInteger) == User.discord_id)  # handle == discord_id
+                    .where(Player.price.is_not(None),
+                    )
+                    .order_by(Player.price.desc())
+                    .limit(limit)
+                )
+                rows = result.all()
 
         if not rows:
             await interaction.followup.send("No priced players yet. Run `/pricing update` first.", ephemeral=True)
