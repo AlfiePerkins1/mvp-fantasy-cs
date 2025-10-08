@@ -83,8 +83,6 @@ class Pricing(commands.Cog):
         await interaction.followup.send(msg, ephemeral=True)
 
 
-    #TODO:
-    # Update pricing show command to only include players in the same guild
     @pricing.command(name="show", description="List all registered players and their prices (highest to lowest")
     @app_commands.describe(limit="How many players to show (1–50).", all_guilds="Include players from ALL guilds (default: only this server)")
     async def leaderboard(self, interaction: discord.Interaction, limit: int = 20, all_guilds: bool = False):
@@ -129,10 +127,20 @@ class Pricing(commands.Cog):
             await interaction.followup.send("No priced players yet. Run `/pricing update` first.", ephemeral=True)
             return
 
+        seen = set()
+        unique_rows = []
+        for handle, price in rows:
+            if handle in seen:
+                continue
+            seen.add(handle)
+            unique_rows.append((handle, price))
+            if len(unique_rows) >= limit:
+                break
+
         # build a numbered list, mentioning users via their Discord IDs (handles)
         lines = []
-        for i, (handle, price) in enumerate(rows, start=1):
-            mention = f"<@{handle}>"  # handle is your stored discord_id
+        for i, (handle, price) in enumerate(unique_rows, start=1):
+            mention = f"<@{handle}>"  # handle is stored discord_id
             lines.append(f"**{i}.** {mention} — **{price:,}**")
 
         embed = discord.Embed(

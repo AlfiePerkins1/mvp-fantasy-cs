@@ -152,7 +152,7 @@ def aggregate_player_stats(matches: List[Dict[str, Any]],
         except StopIteration:
             pass  # ignore malformed scores
 
-        # -------- Ratings (convert 0–1 → 0–100 like your code) --------
+        # Ratings
         lr  = _safe_float(row.get("leetify_rating"))
         ctr = _safe_float(row.get("ct_leetify_rating"))
         tr  = _safe_float(row.get("t_leetify_rating"))
@@ -160,7 +160,7 @@ def aggregate_player_stats(matches: List[Dict[str, Any]],
         if ctr is not None: ct_vals.append(ctr * 100)
         if tr  is not None: t_vals.append(tr * 100)
 
-        # -------- ADR & util --------
+        #  ADR & util
         adr_val = _safe_float(row.get("dpr"))
         if adr_val is not None:
             adr_vals.append(adr_val)
@@ -169,11 +169,11 @@ def aggregate_player_stats(matches: List[Dict[str, Any]],
         if util_avg is not None:
             util_dmg_vals.append(util_avg)
 
-        # -------- Flashes (leading to kill) --------
+        # Flashes (leading to kill)
         flashes_val = _safe_int(row.get("flashbang_leading_to_kill")) or 0
         flashes_total += flashes_val
 
-        # -------- Trades --------
+        # Trades
         tk = _safe_int(row.get("trade_kills_succeed")) or 0
         trade_kills_total += tk
 
@@ -191,9 +191,9 @@ def aggregate_player_stats(matches: List[Dict[str, Any]],
     avg_util    = _avg(util_dmg_vals)
 
     # NOTE on types vs DB columns:
-    # - adr is Float in your model → keep float
-    # - flashes/util_dmg are Integer in your model → cast to int
-    #   (util_dmg here is an average-per-match; if you prefer, change the column to Float.)
+    # - adr is Float in model  keep float
+    # - flashes/util_dmg are Integer in  model cast to int
+    # -  util_dmg is an average-per-match
 
     return {
         "avg_leetify_rating": avg_leetify,

@@ -30,13 +30,13 @@ async def ingest_user_recent_matches(session, *, steam_id: int | str | None = No
                 resolved_user = _U()
                 resolved_user.id = any_uid
 
-    # -------- fetch from API --------
+    #  fetch from API
     matches = await fetch_recent_matches(steam_id, limit=limit)
     fetched = len(matches)
     inserted = 0
     no_row = 0
 
-    # -------- upsert match + player_game for THIS steam --------
+    # upsert match + player_game for THIS steam
     for m in matches:
         match_id = await upsert_match(session, m)
 
