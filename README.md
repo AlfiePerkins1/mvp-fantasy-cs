@@ -56,8 +56,13 @@ Players can purchase and sell up to 1 player a week to try and maximise their po
 - Check players pricing using `/pricing show`
 - Create a team using `/team create <name>`
 - Add players using `/team add <@user>`
+- View your team with `/team show <week>`
+  - Week = 1 means current week team
+  - Week = 2 means next weeks team 
+
 - Remove players from team using `/team remove <@user>`
-- Check leaderboard with `/leaderboard show`
+- Check the teams leaderboard with `/leaderboard teams`
+- Check the players leaderboard with `/leader player`
 
 - Transfers made apply for the start of the next gameweek (Monday 00:00 UK time)
   - This means that when first creating a team it **WON'T** be active till next week.
