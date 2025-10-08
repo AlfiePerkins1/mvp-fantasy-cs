@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from discord.utils import escape_mentions
+import re
 
 from backend.db import SessionLocal
 from backend.services.repo import set_user_steam_id, remove_user_steam_id, get_or_create_player, get_or_create_user, create_user
@@ -34,9 +35,10 @@ class Account(commands.Cog):
         await interaction.response.defer(ephemeral=True, thinking=True)
 
 
-        if "STEAM" in steamid:
+        if bool(re.fullmatch(r"765\d{14}", steamid)):
             interaction.followup.send("You used the wrong type of SteamID! It's steam 64 like this: 76561198259409483")
             return
+
 
         member = interaction.user
         discord_id = member.id
