@@ -5,17 +5,18 @@ from discord.ext import commands
 
 
 from typing import Optional
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, and_
 from sqlalchemy.exc import IntegrityError
 
 from discord.utils import escape_mentions
 from datetime import timedelta, timezone, datetime
+from zoneinfo import ZoneInfo
 from backend.db import SessionLocal
 from backend.services.market import already_on_team, roster_count, get_or_create_team_week_state, \
     get_global_player_price, TRANSFERS_PER_WEEK, buy_player, sell_player, team_has_active_this_week, roster_for_week
 
 from backend.services.repo import get_or_create_user, create_team, ensure_player_for_user
-from backend.models import Team, TeamPlayer, Player, WeeklyPoints, PlayerStats, player
+from backend.models import Team, TeamPlayer, Player, WeeklyPoints, PlayerStats, player, User
 from backend.services.leetify_api import current_week_start_london, next_week_start_london, current_week_start_norm, next_week_start_norm
 
 
@@ -35,6 +36,18 @@ async def resolve_display_name(guild: discord.Guild | None, user_id: int, fallba
         except (discord.NotFound, discord.HTTPException, discord.Forbidden):
             pass
     return fallback
+
+def week_start_local_naive(tz: str = "Europe/London", minute: int = 1):
+    """
+    Monday 00:<minute> local time, returned as a *naive* datetime.
+    Use minute=1 if DB rows were written at 00:01 (legacy).
+    """
+    now_local = datetime.now(ZoneInfo(tz))
+    start_local = (now_local - timedelta(days=now_local.weekday())).replace(
+        hour=0, minute=minute, second=0, microsecond=0
+    )
+    return start_local.replace(tzinfo=None)
+
 
 
 class Teams(commands.Cog):
@@ -279,92 +292,85 @@ class Teams(commands.Cog):
     @team.command(name="show", description="Show your current team")
     @app_commands.describe(
         week="Which roster to show: 1 = This week, 2 = Next week.",
-        user="Show someone else’s team (optional)"
+        user="Show someone else’s team (optional)",
     )
     async def show(self, interaction: discord.Interaction, week: Optional[int] = 1,
                    user: Optional[discord.User] = None):
-        """
-        Shows the user's (or specified user's) fantasy team for a given gameweek, with each player's
-        weekly score and a team total. Reads only.
-
-        Week selection:
-          1 => This week (current gameweek starting Monday 00:00 London)
-          2 => Next week (next gameweek starting Monday 00:00 London)
-        """
+        guild = interaction.guild
         guild_id = interaction.guild_id
         if not guild_id:
             await interaction.response.send_message("Use this in a server (not DMs).", ephemeral=True)
             return
 
-        # Default to "this week" if invalid week value provided
         week = 2 if week == 2 else 1
-
         target_user = user or interaction.user
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=False)
 
-        # Helpers
         def fmt_2sf(x) -> str:
             try:
                 return f"{float(x):.2g}"
-            except Exception:
+            except:
                 return "n/a"
 
         def fmt_1dp(x) -> str:
             try:
                 return f"{float(x):.1f}"
-            except Exception:
+            except:
                 return "n/a"
+
+        # Week keys (London local-naive)
+        base_start = week_start_local_naive("Europe/London", minute=1)  # 00:01 local-naive
+        selected_start = base_start if week == 1 else (base_start + timedelta(days=7))
+        selected_end = selected_start + timedelta(days=7)
+        label = "This Week" if week == 1 else "Next Week"
+
+        # Tolerance
+
+        wp_from = selected_start - timedelta(hours=2)
+        wp_to = selected_end + timedelta(hours=2)
 
         async with SessionLocal() as session:
             async with session.begin():
-                # Lookup the owner’s DB user row
+                # Find the caller's DB user (no create here)
+                target_db_user = await session.scalar(
+                    select(User).where(
+                        User.discord_id == int(target_user.id),
+                        User.discord_guild_id == guild_id
+                    )
+                )
+                if not target_db_user:
+                    await interaction.followup.send(
+                        f"**{escape_mentions(target_user.display_name)}** has no account in this server.",
+                        allowed_mentions=NO_PINGS
+                    )
+                    return
 
-                target_db_user = await get_or_create_user(session, target_user.id, discord_guild_id=guild_id)
-
-                # Find their team in this guild
-                row = await session.execute(
+                # Team for this guild
+                team_row = await session.execute(
                     select(Team.id, Team.name)
                     .where(Team.owner_id == target_db_user.id, Team.guild_id == guild_id)
                 )
-                team_data = row.first()
-                if not team_data:
+                row = team_row.first()
+                if not row:
                     await interaction.followup.send(
                         f"**{escape_mentions(target_user.display_name)}** has no team in this server.",
                         allowed_mentions=NO_PINGS
                     )
                     return
+                team_id, team_name = row
 
-                team_id, team_name = team_data
-
-                # Pick the gameweek to display
-                now = datetime.now(tz=timezone.utc)
-                this_week = current_week_start_norm(now)  # tz-aware datetime (Monday 00:00 London)
-                next_week = next_week_start_norm(now)
-
-                selected_week = next_week if week == 2 else this_week
-
-                selected_week_key = (
-                    selected_week
-                    .astimezone(timezone.utc)
-                    .replace(minute=0, second=0, microsecond=0, tzinfo=None)  # <-- snap 00:01 → 00:00, naive UTC
-                )
-
-                print(f'Selected week: {selected_week}')
-                label = "Next Week" if week == 2 else "This Week"
-
-                # Budget / transfers state for the selected week
-                state = await get_or_create_team_week_state(session, guild_id, team_id, selected_week)
-
-                # Roster FOR THE SELECTED WEEK:
-                # Only rows whose [effective_from_week, effective_to_week) covers selected_week
+                # Roster active in the selected week: interval *overlap*
                 roster_rows = await session.execute(
                     select(Player.id, Player.handle, TeamPlayer.role)
                     .join(TeamPlayer, TeamPlayer.player_id == Player.id)
                     .where(
                         TeamPlayer.team_id == team_id,
-                        TeamPlayer.effective_from_week <= selected_week,
-                        or_(TeamPlayer.effective_to_week.is_(None), TeamPlayer.effective_to_week > selected_week),
+                        TeamPlayer.effective_from_week < selected_end,
+                        or_(
+                            TeamPlayer.effective_to_week.is_(None),
+                            TeamPlayer.effective_to_week > selected_start,
+                        ),
                     )
                     .order_by(Player.handle.asc())
                 )
@@ -378,55 +384,140 @@ class Teams(commands.Cog):
                     )
                     return
 
-                # Build player display info
+                # Map handles
+                handle_ids = [int(h) for _, h, _ in roster if str(h).isdigit()]
+                users_in_guild = await session.execute(
+                    select(User.discord_id, User.id)
+                    .where(User.discord_id.in_(handle_ids), User.discord_guild_id == guild_id)
+                )
+                discord_to_userid = dict(users_in_guild.tuples().all())
+                db_user_ids = [discord_to_userid.get(int(h)) for _, h, _ in roster if str(h).isdigit()]
+                db_user_ids = [uid for uid in db_user_ids if uid is not None]
+
+                # Weekly points for the selected week/guild
+                latest_per_user = (
+                    select(
+                        WeeklyPoints.user_id,
+                        func.max(WeeklyPoints.computed_at).label("latest_ts")
+                    )
+                    .where(
+                        WeeklyPoints.guild_id == guild_id,
+                        WeeklyPoints.user_id.in_(db_user_ids),
+                        WeeklyPoints.week_start >= wp_from,
+                        WeeklyPoints.week_start < wp_to,
+                        WeeklyPoints.weekly_score.isnot(None),
+                        WeeklyPoints.computed_at.isnot(None),
+                        WeeklyPoints.ruleset_id == 1, # Rulset filter for future
+                    )
+                    .group_by(WeeklyPoints.user_id)
+                ).subquery()
+
+                wp_rows = await session.execute(
+                    select(WeeklyPoints.user_id, WeeklyPoints.weekly_score)
+                    .join(
+                        latest_per_user,
+                        and_(
+                            WeeklyPoints.user_id == latest_per_user.c.user_id,
+                            WeeklyPoints.computed_at == latest_per_user.c.latest_ts,
+                        )
+                    )
+                )
+                points_map: dict[int, float] = dict(wp_rows.tuples().all())
+
+                missing_uids = [uid for uid in db_user_ids if uid not in points_map]
+                if missing_uids:
+                    # map missing user_id -> discord_id
+                    uid_to_discord = dict(
+                        (u_id, d_id)
+                        for d_id, u_id in discord_to_userid.items()
+                    )
+                    missing_dids = [uid_to_discord.get(uid) for uid in missing_uids if uid_to_discord.get(uid)]
+                    if missing_dids:
+                        # all user_ids across ANY guild that share these discord_ids
+                        any_user_ids = await session.execute(
+                            select(User.id).where(User.discord_id.in_(missing_dids))
+                        )
+                        any_user_ids = [r[0] for r in any_user_ids.all()]
+                        if any_user_ids:
+                            latest_any = (
+                                select(
+                                    WeeklyPoints.user_id,
+                                    func.max(WeeklyPoints.computed_at).label("latest_ts")
+                                )
+                                .where(
+                                    WeeklyPoints.user_id.in_(any_user_ids),
+                                    WeeklyPoints.week_start >= wp_from,
+                                    WeeklyPoints.week_start < wp_to,
+                                    WeeklyPoints.weekly_score.isnot(None),
+                                    WeeklyPoints.computed_at.isnot(None),
+                                    WeeklyPoints.ruleset_id == 1,
+                                )
+                                .group_by(WeeklyPoints.user_id)
+                            ).subquery()
+
+                            wp_any = await session.execute(
+                                select(WeeklyPoints.user_id, WeeklyPoints.weekly_score)
+                                .join(
+                                    latest_any,
+                                    and_(
+                                        WeeklyPoints.user_id == latest_any.c.user_id,
+                                        WeeklyPoints.computed_at == latest_any.c.latest_ts,
+                                    )
+                                )
+                            )
+                            rows_any = wp_any.tuples().all()
+
+                            # map those "any guild" user_ids back to this guild's uid via discord_id
+                            id_to_did = dict(
+                                (u_id, d_id)
+                                for u_id, d_id in (await session.execute(
+                                    select(User.id, User.discord_id).where(User.id.in_([u for (u, _) in rows_any]))
+                                )).tuples().all()
+                            )
+                            for uid_any, score in rows_any:
+                                did = id_to_did.get(uid_any)
+                                uid_here = discord_to_userid.get(did)
+                                if uid_here is not None and uid_here not in points_map:
+                                    points_map[uid_here] = score
+
+                # Player averages for display
+                ps_rows = await session.execute(
+                    select(PlayerStats.user_id, PlayerStats.avg_leetify_rating, PlayerStats.sample_size)
+                    .where(PlayerStats.guild_id == guild_id, PlayerStats.user_id.in_(db_user_ids))
+                )
+                stats_map = {uid: (avg, n) for uid, avg, n in ps_rows.all()}
+
+                # Budget/state for the same key
+                state = await get_or_create_team_week_state(session, guild_id, team_id, selected_start)
+
+                # Build table + total
                 stat_rows = []
                 team_total = 0.0
-
                 for player_id, handle, role in roster:
-                    user_id_num = int(handle) if str(handle).isdigit() else None
-                    display_name = f"Unknown ({handle})"
-                    avg_txt = score_txt = games_txt = "n/a"
+                    disp = f"Unknown ({handle})"
+                    avg_txt, score_txt, games_txt = "n/a", "n/a", "0"
 
-                    if user_id_num:
-                        # Resolve display name (best-effort)
-                        display_name = await resolve_display_name(
-                            interaction.guild, user_id_num, fallback=f"Unknown ({handle})"
-                        )
-                        display_name = escape_mentions(display_name)
+                    if str(handle).isdigit():
+                        did = int(handle)
+                        disp_name = await resolve_display_name(guild, did, fallback=f"Unknown ({handle})")
+                        disp = escape_mentions(disp_name)
+                        uid = discord_to_userid.get(did)
+                        if uid:
+                            avg, n = stats_map.get(uid, (None, 0))
+                            if avg is not None:
+                                avg_txt = fmt_2sf(avg)
+                            games_txt = str(n or 0)
+                            pts = points_map.get(uid)
+                            if pts is not None:
+                                score_txt = fmt_1dp(pts)
+                                try:
+                                    team_total += float(pts)
+                                except:
+                                    pass
 
-                        # Fetch PlayerStats (cached averages)
-                        member_row = await get_or_create_user(session, user_id_num, discord_guild_id=guild_id)
-                        db_user_id = member_row.id
+                    stat_rows.append((disp, role or "-", avg_txt, score_txt, games_txt))
 
-                        stats_row = await session.scalar(
-                            select(PlayerStats)
-                            .where(PlayerStats.user_id == db_user_id, PlayerStats.guild_id == guild_id)
-                        )
-                        if stats_row:
-                            if stats_row.avg_leetify_rating is not None:
-                                avg_txt = fmt_2sf(stats_row.avg_leetify_rating)
-                            games_txt = str(stats_row.sample_size or 0)
-
-                        # Weekly fantasy points for the selected gameweek
-                        points_val = await session.scalar(
-                            select(WeeklyPoints.weekly_score)
-                            .where(
-                                WeeklyPoints.user_id == db_user_id,
-                                WeeklyPoints.guild_id == guild_id,
-                                WeeklyPoints.week_start == selected_week_key,  #  exact week we’re showing (replaced 00:01 to 00:00)
-                            )
-                            .limit(1)
-                        )
-                        if points_val is not None:
-                            score_txt = fmt_1dp(points_val)
-                            try:
-                                team_total += float(points_val)
-                            except Exception:
-                                pass
-
-                    stat_rows.append((display_name, role or "-", avg_txt, score_txt, games_txt))
-
-        # Build monospaced table
+        # Render table
         def fmt_row(cols, widths):
             return " | ".join(str(c).ljust(w) for c, w in zip(cols, widths))
 
@@ -438,31 +529,22 @@ class Teams(commands.Cog):
             max(len("Score"), max((len(r[3]) for r in stat_rows), default=5)),
             max(len("Games"), max((len(r[4]) for r in stat_rows), default=3)),
         ]
-
         lines = ["```", fmt_row(headers, widths), fmt_row(["-" * w for w in widths], widths)]
-        for r in stat_rows:
-            lines.append(fmt_row(r, widths))
+        for r in stat_rows: lines.append(fmt_row(r, widths))
         lines.append("```")
-
-        week_str = selected_week.strftime("%Y-%m-%d %H:%M %Z")
 
         embed = discord.Embed(
             title=f"{escape_mentions(target_user.display_name)}’s Team — {escape_mentions(team_name)}",
-            description=f"**{label}** (Gameweek starting {week_str})",
-            type="rich"
+            description=f"**{label}** (Gameweek starting {selected_start})",
+            type="rich",
         )
         embed.add_field(
             name=f"Players (Budget Remaining: {state.budget_remaining})",
             value="\n".join(lines) if stat_rows else "_(no players for this week)_",
-            inline=False
+            inline=False,
         )
-        embed.add_field(
-            name="Team Total (this gameweek)",
-            value=f"**{fmt_1dp(team_total)}**",
-            inline=False
-        )
-        embed.set_footer(text="Players shown are those whose [from, to) interval covers this gameweek.")
-
+        embed.add_field(name="Team Total (this gameweek)", value=f"**{fmt_1dp(team_total)}**", inline=False)
+        embed.set_footer(text="Players shown are those whose [from, to) interval overlaps this gameweek.")
         await interaction.followup.send(embed=embed, allowed_mentions=NO_PINGS)
 
     @team.command(name="change_name", description="Change the name of your team")

@@ -266,7 +266,8 @@ class stats(commands.Cog):
         async with SessionLocal() as session:
             users = (await session.execute(
                 select(User.id, User.discord_id, User.steam_id)
-                .where(User.steam_id.is_not(None))
+                .where(User.steam_id.is_not(None)),
+                User.discord_guild_id == guild_id,
             )).all()
             print('test')
             print(f'users: {len(users)}')

@@ -61,7 +61,13 @@ class Account(commands.Cog):
         if exists is not None:
             async with SessionLocal() as session:
                 async with session.begin():
-                    user = await get_or_create_user(session, discord_id=discord_id, discord_guild_id=guild_id)
+                    user = await get_or_create_user(session,
+                                                    discord_id=discord_id,
+                                                    discord_guild_id=guild_id,
+                                                    discord_username=discord_username,
+                                                    discord_global_name=discord_global_name,
+                                                    discord_display_name=discord_display_name
+                                                    )
                     user.has_leetify = bool(exists)
 
         msg = f"Registered! Linked SteamID `{steamid}` for **{discord_display_name}**."

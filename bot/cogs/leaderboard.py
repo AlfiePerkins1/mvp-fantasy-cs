@@ -7,12 +7,14 @@ from typing import Optional
 from backend.db import SessionLocal
 
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import select
+from sqlalchemy import select, or_
+from sqlalchemy.sql import func as sqlfunc
+from zoneinfo import ZoneInfo
 
 from backend.models import User, WeeklyPoints
 from backend.services.leaderboard import get_team_leaderboard
 from backend.services.leetify_api import current_week_start_norm
-
+from bot.cogs.stats_refresh import week_bounds_naive_utc
 
 
 
@@ -39,6 +41,9 @@ async def _resolve_display_name_quick(guild, discord_id: int, fallback: str | No
     except Exception:
         pass
     return fallback or str(discord_id)
+
+
+
 
 class Leaderboards(commands.Cog):
     """Scoring config & queries: view, set weights/multipliers, preview points."""
@@ -69,6 +74,8 @@ class Leaderboards(commands.Cog):
             await interaction.response.defer(ephemeral=False)
 
         # last 7 days window
+
+
         since_dt = datetime.now(timezone.utc) - timedelta(days=7)
         week_norm = current_week_start_norm(datetime.now())
         print(week_norm)

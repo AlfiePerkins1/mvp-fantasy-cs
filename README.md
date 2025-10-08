@@ -21,8 +21,8 @@ Minimal permissions refer to the minimum permissions that allow the bot to work.
 
 ## Reporting Issues
 
-If you encounter any issues (including commands that fail), please fill out an issue on the [Github Issues Page](https://github.com/AlfiePerkins1/mvp-fantasy-cs/issues) with as much information as possible 
-
+If you encounter any issues (including commands that fail), please fill out an issue on the [Github Issues Page](https://github.com/AlfiePerkins1/mvp-fantasy-cs/issues) with as much information as possible <br>
+For status reports please visit the discord channel [here](https://discord.gg/C6DfvPzK2r)
 
 
 ## What the project is

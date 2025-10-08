@@ -57,6 +57,7 @@ async def refresh_one_player(session, discord_id: str) -> dict:
         print(f' Failed for Discord ID: {discord_id}')
         return {"discord_id": discord_id, "ok": False, "reason": "no_user"}
 
+    print(f' Steam ID being used: {u.steam_id}')
     profile = await fetch_profile(u.steam_id)
     ranks = extract_ranks(profile) if profile else {
         "renown_elo": None, "premier_elo": None, "faceit_elo": None
