@@ -187,8 +187,9 @@ class stats(commands.Cog):
     stats = app_commands.Group(name="stats", description="Update stats")
 
     @stats.command(name="backfill_games", description="Ingest recent matches for all registered users")
+    @app_commands.describe(all_guilds="If true, process users from EVERY guild (use sparingly)")
     @app_commands.checks.has_permissions(administrator=True)
-    async def backfill_games(self, interaction: discord.Interaction, limit: int = 100):
+    async def backfill_games(self, interaction: discord.Interaction, limit: int = 100, all_guilds: bool = False):
         """
             Admin Only
             Fetches and stores recent matches for all registered users
@@ -204,35 +205,49 @@ class stats(commands.Cog):
         guild_id = interaction.guild_id
         await interaction.response.defer(ephemeral=True, thinking=True)
 
-        async with SessionLocal() as session:
-            users = (await session.execute(
-                select(User.discord_id).where(User.steam_id.is_not(None))
-            )).scalars().all()
+        scope_guild_id = interaction.guild_id
+        if not scope_guild_id and not all_guilds:
+            await interaction.followup.send("Use this in a server (or pass all_guilds=True).", ephemeral=True)
+            return
 
-            total = 0
-            errors = []
-            for did in users:
+        total = 0
+        errors: list[tuple[int, str]] = []
+
+        async with SessionLocal() as session:
+            q = select(User.steam_id)
+            q = q.where(User.steam_id.is_not(None))
+            if not all_guilds:
+                q = q.where(User.discord_guild_id == scope_guild_id)
+
+            steams = [int(s) for (s,) in (await session.execute(q)).all()]
+            if not steams:
+                scope = "all guilds" if all_guilds else f"this server ({scope_guild_id})"
+                await interaction.followup.send(f"No registered users with Steam IDs in {scope}.", ephemeral=True)
+                return
+
+            for steam in sorted(set(steams)):
                 try:
-                    await ingest_user_recent_matches(session, discord_id=int(did), limit=limit, guild_id=guild_id)
+                    await ingest_user_recent_matches(session, steam_id=steam, limit=limit)
                     total += 1
                 except Exception as e:
-                    error_msg = str(e)
-
-                    if "404 Not Found" in error_msg:
-                        errors.append((did, "doesn’t have a Leetify profile"))
+                    msg = str(e)
+                    if "404 Not Found" in msg:
+                        errors.append((steam, "doesn’t have a Leetify profile"))
                     else:
-                        errors.append((did, error_msg))
+                        errors.append((steam, msg))
 
             await session.commit()
 
-        msg = f"Backfill complete. Ingested matches for {total} users."
+        scope_txt = "all guilds" if all_guilds else "this server"
+        msg = f"Backfill complete. Ingested matches for {total} unique Steam IDs ({scope_txt})."
         if errors:
-            msg += f"\n{len(errors)} failed:\n" + "\n".join(f"- <@{d}>: {err}" for d, err in errors[:5])
+            msg += "\n" + f"{len(errors)} failed:\n" + "\n".join(f"- steam `{s}`: {err}" for s, err in errors[:6])
         await interaction.followup.send(msg, ephemeral=True)
 
     @stats.command(name="update_all", description="Update player_stats for all registered users this week")
+    @app_commands.describe(all_guilds="If true, process users from EVERY guild (use sparingly)")
     @app_commands.checks.has_permissions(administrator=True)
-    async def update_all(self, interaction: discord.Interaction, limit: int = 100):
+    async def update_all(self, interaction: discord.Interaction, limit: int = 100, all_guilds: bool = False):
         """
             Admin Only
 
@@ -247,68 +262,79 @@ class stats(commands.Cog):
 
         """
         await interaction.response.defer(ephemeral=True, thinking=True)
-        guild_id = interaction.guild_id
-        if not guild_id:
-            await interaction.followup.send("Use this in a server.", ephemeral=True)
+
+        scope_guild_id = interaction.guild_id
+        if not scope_guild_id and not all_guilds:
+            await interaction.followup.send("Use this in a server (or pass all_guilds=True).", ephemeral=True)
             return
 
-        week_start_london = current_week_start_london()
-        week_start_utc = week_start_london.astimezone(timezone.utc)
+        # canonical week boundary — use this SAME key everywhere
+        week_start_utc_naive, week_end_utc_naive = week_bounds_naive_utc("Europe/London")
+        week_label = week_start_utc_naive.strftime("%d-%b-%Y")
 
-        week_start = current_week_start_london()
-        updated, failed = 0, []
-
-        week_start_utc_naive, week_end_utc_naive = week_bounds_naive_utc()
-        week_start_local_str = week_start_utc_naive.strftime("%d-%b-%Y")
-
-        skipped_no_games = []
+        updated = 0
+        skipped_no_games: list[int] = []  # discord_ids with no games this week
+        failed: list[tuple[int, str]] = []  # (discord_id or steam, error)
 
         async with SessionLocal() as session:
-            users = (await session.execute(
-                select(User.id, User.discord_id, User.steam_id)
-                .where(User.steam_id.is_not(None)),
-                User.discord_guild_id == guild_id,
-            )).all()
-            print('test')
-            print(f'users: {len(users)}')
+            # 1) pick users in-scope
+            q = select(User.id, User.discord_id, User.steam_id, User.discord_guild_id).where(
+                User.steam_id.is_not(None)
+            )
+            if not all_guilds:
+                q = q.where(User.discord_guild_id == scope_guild_id)
 
-            for uid, did, steam in users:
+            users = (await session.execute(q)).all()
+            if not users:
+                scope = "all guilds" if all_guilds else f"this server ({scope_guild_id})"
+                await interaction.followup.send(f"No registered users with Steam IDs in {scope}.", ephemeral=True)
+                return
+
+            # 2) ingest once per unique steam
+            unique_steams = {int(s) for _, _, s, _ in users if s is not None}
+            for steam in unique_steams:
                 try:
-                    #  make sure we have recent games
-                    await ingest_user_recent_matches(session, discord_id=int(did), limit=limit, guild_id=guild_id)
-                    print("ingested")
-                    print(f'uid: {uid}')
-                    #  aggregate this user's current week from player_games
-                    breakdown = await aggregate_week_from_db(session, steam_id=steam, week_start_utc=week_start_utc_naive)
-                    print("broken down")
-                    print(breakdown)
-                    #  compute other_games (anything not in the 4 buckets)
-                    sample = breakdown.get("sample_size", 0) or 0
-                    mm_g = breakdown.get("mm_games", 0) or 0
-                    fac_g = breakdown.get("faceit_games", 0) or 0
-                    prem_g = breakdown.get("premier_games", 0) or 0
-                    ren_g = breakdown.get("renown_games", 0) or 0
-                    other_games = max(0, int(sample) - int(mm_g + fac_g + prem_g + ren_g))
+                    await ingest_user_recent_matches(session, steam_id=steam, limit=limit)
+                except Exception as e:
+                    # keep going; we can still aggregate what we have
+                    failed.append((steam, f"ingest: {e}"))
 
-                    #  Append discord id if there was no games played
-                    print(sample)
+            # 3) aggregate per user/guild and upsert
+            for uid, did, steam, user_guild_id in users:
+                try:
+                    if steam is None:
+                        failed.append((did, "no Steam linked"))
+                        continue
+
+                    breakdown = await aggregate_week_from_db(
+                        session,
+                        steam_id=int(steam),
+                        week_start_utc=week_start_utc_naive,
+                        week_end_utc=week_end_utc_naive,
+                    )
+
+                    sample = int(breakdown.get("sample_size") or 0)
                     if sample == 0:
                         skipped_no_games.append(did)
                         continue
 
-                    print('upserting')
-                    #  upsert into player_stats (ct_rating/t_rating not aggregated here  None)
+                    mm_g = int(breakdown.get("mm_games", 0) or 0)
+                    fac_g = int(breakdown.get("faceit_games", 0) or 0)
+                    prem_g = int(breakdown.get("premier_games", 0) or 0)
+                    ren_g = int(breakdown.get("renown_games", 0) or 0)
+                    other_games = max(0, sample - (mm_g + fac_g + prem_g + ren_g))
+
                     await upsert_stats(
                         session=session,
                         user_id=uid,
-                        guild_id=guild_id,
+                        guild_id=user_guild_id,
                         avg_leetify_rating=breakdown.get("avg_leetify_rating"),
                         sample_size=sample,
                         trade_kills=breakdown.get("trade_kills"),
                         ct_rating=breakdown.get("ct_rating"),
                         t_rating=breakdown.get("t_rating"),
                         adr=breakdown.get("adr"),
-                        entries=breakdown.get("entries"),
+                        entries=breakdown.get("entries", 0.0),
                         flashes=breakdown.get("flashes"),
                         util_dmg=breakdown.get("util_dmg"),
                         faceit_games=fac_g,
@@ -318,40 +344,39 @@ class stats(commands.Cog):
                         other_games=other_games,
                         wins=breakdown.get("wins"),
                     )
-                    print(f' Breaking down')
-                    bd = breakdown_from_agg(breakdown)  # same weights as elsewhere
+
+                    bd = breakdown_from_agg(breakdown)
                     await upsert_weekly_points_from_breakdown(
                         session,
-                        week_start_utc=week_start_utc + timedelta(hours=1),
-                        guild_id=guild_id,
+                        week_start_utc=week_start_utc_naive,  # ← exact canonical key; no offsets
+                        guild_id=user_guild_id,
                         user_id=uid,
                         ruleset_id=1,
                         bd=bd,
                     )
-
                     updated += 1
+
                 except Exception as e:
-                    error_msg = str(e)
-                    print(error_msg)
-                    if "float() argument must be a string" in error_msg:
-                        failed.append((did, "hasn't played any games this week!"))
-                    elif "404 Not Found" in error_msg:
+                    msg = str(e)
+                    if "404 Not Found" in msg:
                         failed.append((did, "doesn’t have a Leetify profile"))
                     else:
-                        failed.append((did, error_msg))
+                        failed.append((did, msg))
 
             await session.commit()
-        msg = f"Updated player_stats & weekly_points for {updated} users (week starting {week_start.strftime("%d-%b-%Y")})."
-        # New messages if people didnt play games
-        if updated == 0 and not failed and skipped_no_games:
-            msg = f"Updated player_stats & weekly_points for 0 users (week starting {week_start.strftime("%d-%b-%Y")}).\nLooks like no one played a game this week yet."
-        elif skipped_no_games:
-            msg += f"\n Skipped (no games): {len(skipped_no_games)}\n" + "\n".join(
-                f"- <@{d}>" for d in skipped_no_games[:6])
+
+        scope_txt = "all guilds" if all_guilds else f"this server ({scope_guild_id})"
+        parts = [
+            f"Updated player_stats & weekly_points for **{updated}** users (week starting {week_label}) in {scope_txt}."]
+        if skipped_no_games:
+            parts.append(f"Skipped (no games): {len(skipped_no_games)}")
+            parts.extend(f"- <@{d}>" for d in skipped_no_games[:6])
         if failed:
-            # msg += f"\n Failed: {failed[:1]}"
-            msg += f"\n {len(failed)} failed:\n" + "\n".join(f"- <@{d}>: {err}" for d, err in failed[:6])
-        await interaction.followup.send(msg, ephemeral=True)
+            parts.append(f"Failed: {len(failed)}")
+            for who, err in failed[:6]:
+                parts.append(f"- {who}: {err}")
+
+        await interaction.followup.send("\n".join(parts), ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

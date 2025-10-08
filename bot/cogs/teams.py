@@ -15,7 +15,7 @@ from backend.db import SessionLocal
 from backend.services.market import already_on_team, roster_count, get_or_create_team_week_state, \
     get_global_player_price, TRANSFERS_PER_WEEK, buy_player, sell_player, team_has_active_this_week, roster_for_week
 
-from backend.services.repo import get_or_create_user, create_team, ensure_player_for_user
+from backend.services.repo import get_or_create_user, create_team, ensure_player_for_user, get_user
 from backend.models import Team, TeamPlayer, Player, WeeklyPoints, PlayerStats, player, User
 from backend.services.leetify_api import current_week_start_london, next_week_start_london, current_week_start_norm, next_week_start_norm
 
@@ -88,7 +88,7 @@ class Teams(commands.Cog):
         async with SessionLocal() as session:
             async with session.begin():
                 # fetch or create the user row
-                user = await get_or_create_user(session, interaction.user.id, discord_guild_id=guild_id)
+                user = await get_user(session, discord_id= interaction.user.id, guild_id=guild_id)
 
                 # check if team already exists for this user in this guild
                 existing = await session.scalar(
@@ -126,13 +126,13 @@ class Teams(commands.Cog):
 
         async with SessionLocal() as session:
             async with session.begin():
-                owner = await get_or_create_user(session, interaction.user.id, discord_guild_id=guild_id)
+                owner = await get_user(session, discord_id= interaction.user.id, guild_id=guild_id)
                 team = await session.scalar(select(Team).where(Team.owner_id == owner.id, Team.guild_id == guild_id))
                 if not team:
                     await interaction.followup.send("Create a team first: `/team create`", ephemeral=True)
                     return
 
-                target_user = await get_or_create_user(session, member.id, discord_guild_id=guild_id)
+                target_user = await get_user(session, discord_id= member.id, guild_id=guild_id)
                 if not target_user.steam_id:
                     await interaction.followup.send(
                         f"{member.mention} isn’t registered. Ask them to run `/account register <steamid>` first.",
@@ -231,14 +231,14 @@ class Teams(commands.Cog):
         async with SessionLocal() as session:
             async with session.begin():
                 # Team ownership
-                owner = await get_or_create_user(session, interaction.user.id, discord_guild_id=guild_id)
+                owner = await get_user(session, discord_id= interaction.user.id, guild_id=guild_id)
                 team = await session.scalar(select(Team).where(Team.owner_id == owner.id, Team.guild_id == guild_id))
                 if not team:
                     await interaction.followup.send("Create a team first: `/team create`", ephemeral=True)
                     return
 
                 # Ensure Player row exists
-                target_user = await get_or_create_user(session, member.id, discord_guild_id=guild_id)
+                target_user = await get_user(session, discord_id= member.id, guild_id=guild_id)
                 player_row = await ensure_player_for_user(session, target_user)
 
                 # Time keys
@@ -568,7 +568,7 @@ class Teams(commands.Cog):
         async with SessionLocal() as session:
             async with session.begin():
                 # fetch the caller's team in this guild
-                user = await get_or_create_user(session, interaction.user.id, discord_guild_id=guild_id)
+                user = await get_user(session, discord_id= interaction.user.id, guild_id=guild_id)
                 team = await session.scalar(
                     select(Team).where(Team.owner_id == user.id, Team.guild_id == guild_id)
                 )

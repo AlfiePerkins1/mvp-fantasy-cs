@@ -2,7 +2,7 @@
 from typing import Tuple, Optional
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.leetify_api import current_week_start_london
@@ -51,6 +51,76 @@ async def get_or_create_user(
     print("test 4")
     return user
 
+# Read only, never creates user
+async def get_user(session, *, discord_id: int, guild_id: int) -> User | None:
+    return await session.scalar(
+        select(User).where(
+            User.discord_id == discord_id,
+            User.discord_guild_id == guild_id,
+        )
+    )
+
+# Write only
+from sqlalchemy import select, func
+from sqlalchemy.dialects.sqlite import insert
+
+# Write-only: call this in /account register (or explicit linking), not in read paths.
+async def create_user(
+    session,
+    *,
+    discord_id: int,
+    guild_id: int,
+    steam_id: int | None = None,
+    discord_username: str | None = None,
+    discord_global_name: str | None = None,
+    discord_display_name: str | None = None,
+) -> User:
+    assert guild_id is not None, "guild_id is required"
+
+    # Only include non-None fields in VALUES
+    values = {
+        "discord_id": discord_id,
+        "discord_guild_id": guild_id,
+    }
+    if steam_id is not None:
+        values["steam_id"] = steam_id
+    if discord_username is not None:
+        values["discord_username"] = discord_username
+    if discord_global_name is not None:
+        values["discord_global_name"] = discord_global_name
+    if discord_display_name is not None:
+        values["discord_display_name"] = discord_display_name
+
+    ins = insert(User).values(**values)
+
+    # Only update columns that were provided; keep existing if new value is NULL
+    update_set = {}
+    if steam_id is not None:
+        # keep existing steam_id if it's already set
+        update_set["steam_id"] = func.coalesce(User.steam_id, ins.excluded.steam_id)
+    if discord_username is not None:
+        update_set["discord_username"] = ins.excluded.discord_username
+    if discord_global_name is not None:
+        update_set["discord_global_name"] = ins.excluded.discord_global_name
+    if discord_display_name is not None:
+        update_set["discord_display_name"] = ins.excluded.discord_display_name
+
+    upsert = ins.on_conflict_do_update(
+        # requires UNIQUE(discord_id, discord_guild_id)
+        index_elements=[User.discord_id, User.discord_guild_id],
+        set_=update_set,
+    )
+
+    await session.execute(upsert)
+
+    # return the row
+    return await session.scalar(
+        select(User).where(
+            User.discord_id == discord_id,
+            User.discord_guild_id == guild_id,
+        )
+    )
+
 
 async def get_or_create_player(session: AsyncSession, discord_id: int | str):
     """
@@ -68,7 +138,7 @@ async def get_or_create_player(session: AsyncSession, discord_id: int | str):
 
 async def remove_user_steam_id(
     session: AsyncSession, discord_id: int, *, purge_stats: bool = False, guild_id: Optional[int] = None) -> Tuple[User, Optional[str]]:
-    user = await get_or_create_user(session, discord_id, discord_guild_id=guild_id)
+    user = await get_user(session, discord_id= discord_id, guild_id=guild_id)
     old = user.steam_id
     user.steam_id = None
     await session.flush()
@@ -158,7 +228,7 @@ async def get_or_create_scoring(session: AsyncSession) -> ScoringConfig:
     return cfg
 
 async def set_user_steam_id(session: AsyncSession, discord_id: int, steam_id: str, guild_id: int) -> User:
-    user = await get_or_create_user(session, discord_id, discord_guild_id=guild_id)
+    user = await get_user(session, discord_id= discord_id, guild_id=guild_id)
     # faceit = await get_faceit_player_by_steam(steam_id)
     user.steam_id = steam_id
     # user.faceit = faceit

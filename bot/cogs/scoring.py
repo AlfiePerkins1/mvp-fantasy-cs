@@ -12,7 +12,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from backend.db import SessionLocal
 from backend.services.leetify_api import current_week_start_london
-from backend.services.repo import get_or_create_user, upsert_stats
+from backend.services.repo import get_or_create_user, upsert_stats, get_user
 from backend.models import User, Team, Player, TeamPlayer, WeeklyPoints, PlayerGame, Match
 from backend.services.ingest_user import ingest_user_recent_matches
 
@@ -42,7 +42,7 @@ async def _guild_roster_db_user_ids(session, guild_id: int) -> list[int]:
         if not text.isdigit():
             continue
         discord_id = int(text)
-        user = await get_or_create_user(session, discord_id, discord_guild_id=guild_id)
+        user = await get_user(session, discord_id= discord_id, guild_id=guild_id)
         if user.id not in seen:
             user_ids.append(user.id)
             seen.add(user.id)
@@ -179,7 +179,7 @@ async def _guild_roster_targets(session, guild_id: int):
         if not s.isdigit():
             continue
         discord_id = int(s)
-        u = await get_or_create_user(session, discord_id, discord_guild_id=guild_id)
+        u = await get_user(session, discord_id= discord_id, guild_id=guild_id)
         if u.id not in seen:
             seen.add(u.id)
             targets.append((u.id, discord_id))
@@ -302,7 +302,7 @@ class Scoring(commands.Cog):
             async with session.begin():
                 # build targets
                 if member is not None:
-                    u = await get_or_create_user(session, member.id, discord_guild_id=guild_id)
+                    u = await get_user(session, discord_id= member.id, guild_id=guild_id)
                     targets = [(u.id, member.id)]
                 else:
                     targets = await _guild_roster_targets(session, guild_id)

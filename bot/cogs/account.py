@@ -4,7 +4,7 @@ from discord.ext import commands
 from discord.utils import escape_mentions
 
 from backend.db import SessionLocal
-from backend.services.repo import set_user_steam_id, remove_user_steam_id, get_or_create_player, get_or_create_user
+from backend.services.repo import set_user_steam_id, remove_user_steam_id, get_or_create_player, get_or_create_user, create_user
 from backend.services.leetify_api import leetify_profile_exists
 
 
@@ -45,13 +45,13 @@ class Account(commands.Cog):
 
         async with SessionLocal() as session:
             async with session.begin():
-                user = await get_or_create_user(
+                user = await create_user(
                     session,
                     discord_id=discord_id,
                     discord_username=discord_username,
                     discord_global_name=discord_global_name,
                     discord_display_name=discord_display_name,
-                    discord_guild_id=guild_id
+                    guild_id=guild_id
                 )
                 await set_user_steam_id(session, discord_id, steamid, guild_id=guild_id)
                 player, created = await get_or_create_player(session, discord_id)
@@ -61,9 +61,9 @@ class Account(commands.Cog):
         if exists is not None:
             async with SessionLocal() as session:
                 async with session.begin():
-                    user = await get_or_create_user(session,
+                    user = await create_user(session,
                                                     discord_id=discord_id,
-                                                    discord_guild_id=guild_id,
+                                                    guild_id=guild_id,
                                                     discord_username=discord_username,
                                                     discord_global_name=discord_global_name,
                                                     discord_display_name=discord_display_name
