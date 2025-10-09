@@ -13,17 +13,12 @@ logs/**
 !logs/.gitkeep
 fantasy.db
 
-**/backend/models
-**/backend/routes
-**/backend/db.py
-**/backend/main.py
+
 
 data/
 docs/
 
 
-data/
-jobs/
 
 command_guide.md
 requirements.md
