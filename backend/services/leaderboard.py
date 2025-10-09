@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models import Team, TeamPlayer, WeeklyPoints, User, Player
 from backend.services.leetify_api import week_start_london,  current_week_start_norm
-
+from bot.cogs.stats_refresh import week_bounds_naive_utc
 
 def resolve_weeks(at_time: Optional[datetime] = None,
                   week_norm: Optional[datetime] = None) -> tuple[datetime, datetime]:
@@ -17,6 +17,7 @@ def resolve_weeks(at_time: Optional[datetime] = None,
       week_local: tz-aware Europe/London Monday 00:00 (for TeamPlayer effective window)
       week_norm : UTC-naive Monday 00:00 (for WeeklyPoints.week_start)
     """
+    print(f' resolve weeks, week_local: week_norm: {week_norm}')
     if week_norm is not None:
         # interpret provided week_norm as UTC-naive; convert back to London-aware
         week_norm_aware = week_norm.replace(tzinfo=timezone.utc)
@@ -25,6 +26,7 @@ def resolve_weeks(at_time: Optional[datetime] = None,
     # else derive from 'now'
     week_local = week_start_london(at_time)
     week_norm = current_week_start_norm(at_time)
+    print(f' resolve weeks, week_local: {week_local}, week_norm: {week_norm}')
     return week_local, week_norm
 
 def week_key_naive_utc(week_local):
@@ -52,12 +54,17 @@ async def get_team_leaderboard(
     limit: int = 25,
     offset: int = 0,
 ):
+    print(f'at_time? {at_time}')
+    print('Provided week_start_norm:', week_start_norm)
+    # Using new week start function for dates
+    week_start_utc_naive, week_end_utc_naive = week_bounds_naive_utc("Europe/London")
+
     # Make the week anchors exactly like /team show
+    # These ARE ONLY used for visuals, they DO NOT affect results
     week_local, _ = resolve_weeks(at_time, week_start_norm)
     week_norm_key = (week_start_norm.replace(minute=0, second=0, microsecond=0)
                      if week_start_norm is not None
                      else week_key_naive_utc(week_local))
-    print(f'Week Local: {week_local}')
     print(f'Week Norm: {week_norm_key}')
 
     U = aliased(User)
@@ -74,9 +81,11 @@ async def get_team_leaderboard(
         .join(Player, Player.id == TeamPlayer.player_id)
         .where(
             Team.guild_id == guild_id,
-            TeamPlayer.effective_from_week <= week_local,
-            or_(TeamPlayer.effective_to_week.is_(None),
-                TeamPlayer.effective_to_week > week_local),
+            TeamPlayer.effective_from_week < week_end_utc_naive,
+            or_(
+                TeamPlayer.effective_to_week.is_(None),
+                TeamPlayer.effective_to_week > week_start_utc_naive,
+            ),
         )
         .cte("active_tp")
     )
@@ -98,7 +107,7 @@ async def get_team_leaderboard(
             and_(
                 WeeklyPoints.user_id == U.id,
                 WeeklyPoints.guild_id == guild_id,
-                WeeklyPoints.week_start == week_norm_key,
+                WeeklyPoints.week_start == week_start_utc_naive,
             ),
             isouter=True,
         )
@@ -130,7 +139,7 @@ async def get_team_leaderboard(
             and_(
                 WeeklyPoints.user_id == U.id,
                 WeeklyPoints.guild_id == guild_id,
-                WeeklyPoints.week_start == week_norm_key,
+                WeeklyPoints.week_start == week_start_utc_naive,
             ),
             isouter=True,
         )
@@ -159,7 +168,7 @@ async def get_team_leaderboard(
             "owner_discord_id": owner_map.get(r.team_id),
             "points": float(r.points or 0),
             "players": sorted(players_by_team.get(r.team_id, []), key=lambda x: -x[1]),
-            "week_start_local": week_local,
+            "week_start_local": week_start_utc_naive,
             "week_start_norm": week_norm_key,
         })
     return out

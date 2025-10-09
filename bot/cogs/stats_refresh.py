@@ -11,7 +11,6 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.dialects import sqlite
 
 from backend.db import SessionLocal
-from backend.services.leetify_api import current_week_start_london
 from backend.services.repo import upsert_stats
 from backend.models import User, PlayerGame, WeeklyPoints
 from backend.services.ingest_user import ingest_user_recent_matches

@@ -68,10 +68,14 @@ class Leaderboards(commands.Cog):
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=False)
 
-        # same week key you already use
+
+
+        # same week key I already use
         week_norm = current_week_start_norm(datetime.now()) - timedelta(hours=1, minutes=1)
-        print(f'Week Norm: {week_norm}')
-        limit = max(1, min(int(limit), 25))
+        week_start_utc_naive, week_end_utc_naive = week_bounds_naive_utc("Europe/London")
+        print(f'Week norm: {week_norm}')
+        print(f'Week Norm 2: {week_start_utc_naive}')
+
 
         async with SessionLocal() as session:
             async with session.begin():
@@ -198,7 +202,10 @@ class Leaderboards(commands.Cog):
         limit = max(1, min(int(limit), 25))
         top = max(0, min(int(top), 5))  # cap tiny to keep output readable
 
-        week_norm = current_week_start_norm(datetime.now())
+        # Using new function for getting week bounds 23:00 Sunday
+        week_norm, week_end_utc_naive = week_bounds_naive_utc("Europe/London")
+
+        limit = max(1, min(int(limit), 25))
 
         # Fetch aggregated leaderboard
         async with SessionLocal() as session:

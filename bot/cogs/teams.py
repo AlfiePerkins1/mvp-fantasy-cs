@@ -334,15 +334,13 @@ class Teams(commands.Cog):
                 return "n/a"
 
         # Week keys (London local-naive)
-        base_start = week_start_local_naive("Europe/London", minute=1)  # 00:01 local-naive
+        base_start, selected_end = week_bounds_naive_utc("Europe/London")
         selected_start = base_start if week == 1 else (base_start + timedelta(days=7))
-        selected_end = selected_start + timedelta(days=7)
+
         label = "This Week" if week == 1 else "Next Week"
 
         # Tolerance
 
-        wp_from = selected_start - timedelta(hours=2)
-        wp_to = selected_end + timedelta(hours=2)
 
         async with SessionLocal() as session:
             async with session.begin():
@@ -417,8 +415,6 @@ class Teams(commands.Cog):
                     .where(
                         WeeklyPoints.guild_id == guild_id,
                         WeeklyPoints.user_id.in_(db_user_ids),
-                        WeeklyPoints.week_start >= wp_from,
-                        WeeklyPoints.week_start < wp_to,
                         WeeklyPoints.weekly_score.isnot(None),
                         WeeklyPoints.computed_at.isnot(None),
                         WeeklyPoints.ruleset_id == 1, # Rulset filter for future
@@ -460,8 +456,6 @@ class Teams(commands.Cog):
                                 )
                                 .where(
                                     WeeklyPoints.user_id.in_(any_user_ids),
-                                    WeeklyPoints.week_start >= wp_from,
-                                    WeeklyPoints.week_start < wp_to,
                                     WeeklyPoints.weekly_score.isnot(None),
                                     WeeklyPoints.computed_at.isnot(None),
                                     WeeklyPoints.ruleset_id == 1,

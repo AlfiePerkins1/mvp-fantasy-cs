@@ -8,6 +8,15 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy import text
 from backend.db import engine as async_engine
 
+SYSTEM_AD_ID = [276641144128012289]
+
+def system_admin_only():
+    def predicate(interaction: discord.Interaction) -> bool:
+        if interaction.user.id not in SYSTEM_AD_ID:
+            # returning False also works, but raising gives a clearer error you can catch
+            raise app_commands.CheckFailure("This command is restricted.")
+        return True
+    return app_commands.check(predicate)
 
 def _is_admin_only(cmd: app_commands.Command | app_commands.Group) -> bool:
     dp = getattr(cmd, "default_permissions", None)
@@ -93,7 +102,7 @@ class Util(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(name="fix_users_schema", description="SQLite: rebuild users for per-guild uniqueness")
-    @app_commands.checks.has_permissions(administrator=True)
+    @system_admin_only()
     async def fix_users_schema(self, interaction: discord.Interaction):
         await interaction.response.send_message("Rebuilding users table…", ephemeral=True)
 
