@@ -18,7 +18,7 @@ from backend.services.market import already_on_team, roster_count, get_or_create
 from backend.services.repo import get_or_create_user, create_team, ensure_player_for_user, get_user
 from backend.models import Team, TeamPlayer, Player, WeeklyPoints, PlayerStats, player, User
 from backend.services.leetify_api import current_week_start_london, next_week_start_london, current_week_start_norm, next_week_start_norm
-
+from bot.cogs.stats_refresh import week_bounds_naive_utc
 
 
 MAX_TEAM_SIZE = 5  # 5 and a sub
@@ -114,8 +114,8 @@ class Teams(commands.Cog):
     @team.command(name="add", description=f"Add a player to your team (max {MAX_TEAM_SIZE})")
     async def add(self, interaction: discord.Interaction, member: discord.Member, role: Optional[str] = None):
         """
-        Queued add (effective next Monday 00:00). Enforces next-week cap always.
-        Transfer limits are enforced ONLY after the first lock (i.e., when at least one player is active this_week).
+        Queued add (effective next Monday 00:00).
+        Validate everything first (no DB mutations), then do the changes.
         """
         guild_id = interaction.guild_id
         if not guild_id:
@@ -126,59 +126,77 @@ class Teams(commands.Cog):
 
         async with SessionLocal() as session:
             async with session.begin():
-                owner = await get_user(session, discord_id= interaction.user.id, guild_id=guild_id)
-                team = await session.scalar(select(Team).where(Team.owner_id == owner.id, Team.guild_id == guild_id))
+                # fetch
+                owner = await get_user(session, discord_id=interaction.user.id, guild_id=guild_id)
+                team = await session.scalar(
+                    select(Team).where(Team.owner_id == owner.id, Team.guild_id == guild_id)
+                )
                 if not team:
                     await interaction.followup.send("Create a team first: `/team create`", ephemeral=True)
                     return
 
-                target_user = await get_user(session, discord_id= member.id, guild_id=guild_id)
-                if not target_user.steam_id:
+                target_user = await get_user(session, discord_id=member.id, guild_id=guild_id)
+                if not target_user or not target_user.steam_id:
                     await interaction.followup.send(
                         f"{member.mention} isn’t registered. Ask them to run `/account register <steamid>` first.",
                         ephemeral=True, allowed_mentions=NO_PINGS
-                    );
+                    )
                     return
 
                 player_row = await ensure_player_for_user(session, target_user)
 
+                #week keys
                 now = datetime.now(tz=timezone.utc)
-                this_week = current_week_start_norm(now)
-                next_week = next_week_start_norm(now)
+                # Using function from stats_refresh (It should be correct)
+                this_week, next_week = week_bounds_naive_utc()
 
-                state = await get_or_create_team_week_state(session, guild_id, team.id, this_week)
+                # State used for transfer counting (this week) and budget (next week)
+                state_this = await get_or_create_team_week_state(session, guild_id, team.id, this_week)
+                state_next = await get_or_create_team_week_state(session, guild_id, team.id, next_week)
 
+                #pricing
                 price = await get_global_player_price(session, player_row.id)
                 if price is None:
                     await interaction.followup.send(
-                        "No price available for this player. Ask an admin to run `/pricing update`.", ephemeral=True)
+                        "No price available for this player. Ask an admin to run `/pricing update`.",
+                        ephemeral=True
+                    )
                     return
 
-                # Cap + dupes are always enforced against NEXT WEEK (because add takes effect next_week)
+                # Validate
+                # roster for next week (effective_from <= next_week and (to is NULL or to > next_week))
                 next_ids_before = set(await roster_for_week(session, team.id, next_week))
                 if player_row.id in next_ids_before:
-                    await interaction.followup.send(f"{member.mention} is already queued/active for next week.",
-                                                    ephemeral=True);
+                    await interaction.followup.send(
+                        f"{member.mention} is already queued/active for next week.",
+                        ephemeral=True
+                    )
                     return
+
                 if len(next_ids_before) >= MAX_TEAM_SIZE:
-                    await interaction.followup.send(f"Your team is full for next week (max {MAX_TEAM_SIZE}).",
-                                                    ephemeral=True);
-                    return
-                if state.budget_remaining < price:
                     await interaction.followup.send(
-                        f"Not enough budget. Price: {price}, remaining: {state.budget_remaining}.", ephemeral=True
-                    );
+                        f"Your team is full for next week (max {MAX_TEAM_SIZE}).",
+                        ephemeral=True
+                    )
                     return
 
-                # Only enforce transfer LIMITS after the first lock
+                if (state_next.budget_remaining or 0) < price:
+                    await interaction.followup.send(
+                        f"Not enough budget. Price: {price}, remaining: {state_next.budget_remaining}.",
+                        ephemeral=True
+                    )
+                    return
+
                 post_first_lock = await team_has_active_this_week(session, team.id, this_week)
-                if post_first_lock and TRANSFERS_PER_WEEK and state.transfers_used >= TRANSFERS_PER_WEEK:
+                # Only after the first lock can we enforce transfer cap
+                if post_first_lock and TRANSFERS_PER_WEEK and (state_this.transfers_used or 0) >= TRANSFERS_PER_WEEK:
                     await interaction.followup.send(
-                        f"You’ve already used your {TRANSFERS_PER_WEEK} transfer(s) this week.", ephemeral=True
-                    );
+                        f"You’ve already used your {TRANSFERS_PER_WEEK} transfer(s) this week.",
+                        ephemeral=True
+                    )
                     return
 
-                # Insert queued add (effective next_week)
+                # If passed all validations then mutate
                 session.add(TeamPlayer(
                     team_id=team.id,
                     player_id=player_row.id,
@@ -186,26 +204,22 @@ class Teams(commands.Cog):
                     effective_from_week=next_week,
                     effective_to_week=None
                 ))
-                await session.flush()
 
-                # Budget now (FPL-style)
-                state.budget_remaining -= price
+                # Budget applies to next-week’s state (FPL-style)
+                state_next.budget_remaining = (state_next.budget_remaining or 0) - price
 
-                # Only COUNT a transfer after the first lock
-                transfers_used = state.transfers_used
+                # Count a transfer (this week) only if we weren’t already active this week
+                transfers_used = state_this.transfers_used or 0
                 if post_first_lock:
                     this_ids = set(await roster_for_week(session, team.id, this_week))
                     if player_row.id not in this_ids:
-                        state.transfers_used += 1
-                        transfers_used = state.transfers_used
+                        state_this.transfers_used = transfers_used + 1
+                        transfers_used = state_this.transfers_used
 
-                # Optional: mark build_complete when next-week roster hits cap (cosmetic/UX)
-                if not team.build_complete and (len(next_ids_before) + 1) >= MAX_TEAM_SIZE:
-                    team.build_complete = True
-
+        # If we got to this bit then it was all good
         await interaction.followup.send(
             f"Added {member.mention}{f' as **{role}**' if role else ''}. "
-            f"Price: **{price}**. Budget remaining: **{state.budget_remaining}**. "
+            f"Price: **{price}**. Budget remaining: **{state_next.budget_remaining}**. "
             f"Transfers this week: **{transfers_used}/{TRANSFERS_PER_WEEK}**.",
             ephemeral=True, allowed_mentions=NO_PINGS
         )
