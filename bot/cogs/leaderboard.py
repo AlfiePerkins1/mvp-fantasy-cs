@@ -69,7 +69,8 @@ class Leaderboards(commands.Cog):
             await interaction.response.defer(ephemeral=False)
 
         # same week key you already use
-        week_norm = current_week_start_norm(datetime.now()) - timedelta(minutes=1)
+        week_norm = current_week_start_norm(datetime.now()) - timedelta(hours=1, minutes=1)
+        print(f'Week Norm: {week_norm}')
         limit = max(1, min(int(limit), 25))
 
         async with SessionLocal() as session:

@@ -275,6 +275,9 @@ class stats(commands.Cog):
         updated = 0
         skipped_no_games: list[int] = []  # discord_ids with no games this week
         failed: list[tuple[int, str]] = []  # (discord_id or steam, error)
+        print(f' Week Start: {week_start_utc_naive}')
+        print(f' Week End: {week_end_utc_naive}')
+        print(f' Week Label: {week_label}')
 
         async with SessionLocal() as session:
             # pick users in-scope
@@ -348,7 +351,7 @@ class stats(commands.Cog):
                     bd = breakdown_from_agg(breakdown)
                     await upsert_weekly_points_from_breakdown(
                         session,
-                        week_start_utc=week_start_utc_naive,  # ← exact canonical key; no offsets
+                        week_start_utc=week_start_utc_naive,  # exact canonical key; no offsets
                         guild_id=user_guild_id,
                         user_id=uid,
                         ruleset_id=1,
