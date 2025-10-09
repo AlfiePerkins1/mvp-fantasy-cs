@@ -15,21 +15,22 @@ MVP Fantasy is a discord based bot that allows the creation of fantasy leagues w
 If you're an Administrator of a server you can add the bot via the link below. The bot is still in development stage so issues may arise. 
 
 
-[Minimal Permissions](https://discord.com/oauth2/authorize?client_id=1423261991350439956&permissions=580819165342784&integration_type=0&scope=applications.commands+bot)
+[Minimal Permissions Invite Link](https://discord.com/oauth2/authorize?client_id=1423261991350439956&permissions=580819165342784&integration_type=0&scope=applications.commands+bot)
 
 Minimal permissions refer to the minimum permissions that allow the bot to work. Although these permissions have had minimal testing (but should still work). If they don't create an issue on github
 
 ## Reporting Issues
 
 If you encounter any issues (including commands that fail), please fill out an issue on the [Github Issues Page](https://github.com/AlfiePerkins1/mvp-fantasy-cs/issues) with as much information as possible <br>
-For status reports please visit the discord channel [here](https://discord.gg/C6DfvPzK2r)
+
+For status reports, and minor updates please visit the discord channel [here](https://discord.gg/C6DfvPzK2r)
 
 
 ## What the project is
 
 This project allows friends to compete with one another by creating their own fantasy CS2 teams containing players in their own discord server. It features weekly leaderboards as well as a novel pricing scheme.
 
-Players can purchase and sell up to 1 player a week to try and maximise their points. Points are calculated with various statistics from players real games over the leaderboard period (resets Monday 00:00 UK time)
+Players can purchase and sell up to 1 player a week to try and maximise their points. Points are calculated with various statistics from players real games over the leaderboard period (resets Sunday 23:00 UK time)
 
 ## How it works
 - Users register their CS2 profile, which links their SteamID and automatically pulls matches via Leetify
@@ -52,7 +53,7 @@ Players can purchase and sell up to 1 player a week to try and maximise their po
 
 ## User Guide
 
-- Register using `/account register <steamid>`
+- Register using `/account register <steamid64>`
 - Check players pricing using `/pricing show`
 - Create a team using `/team create <name>`
 - Add players using `/team add <@user>`
@@ -62,7 +63,7 @@ Players can purchase and sell up to 1 player a week to try and maximise their po
 
 - Remove players from team using `/team remove <@user>`
 - Check the teams leaderboard with `/leaderboard teams`
-- Check the players leaderboard with `/leader player`
+- Check the players leaderboard with `/leaderboard player`
 
 - Transfers made apply for the start of the next gameweek (Monday 00:00 UK time)
   - This means that when first creating a team it **WON'T** be active till next week.
@@ -160,6 +161,8 @@ In this scenario we have 3 players:
 
 
 ## Pricing System
+
+*Subject to change, better solutions are being brainstormed*
 
 - Pricing is calculated using the following 4 inputs:
 1. Faceit Elo
@@ -286,8 +289,6 @@ Until I sort out task scheduling to automatically collect game data daily. Comma
 
 *I recommend running these commands once a day, however they **MUST** be run as close to the week reset as possible to capture all games.*
 
-
-*N.B: Quite a few files are hidden in this Github Repo* 
 
 
 ### Coming Soon
