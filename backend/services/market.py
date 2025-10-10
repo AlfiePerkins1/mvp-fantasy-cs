@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models import Team, TeamPlayer, Player, TeamWeekState
 from backend.services.leetify_api import current_week_start_london, next_week_start_london, current_week_start_norm, next_week_start_norm
-
+from bot.cogs.stats_refresh import week_bounds_naive_utc
 # config
 INITIAL_BUDGET = 25000
 TRANSFERS_PER_WEEK = 1
@@ -138,8 +138,8 @@ async def roster_for_week(session, team_id: int, week_start: datetime) -> list[i
 
 
 async def transfer_count_for_next_week(session, team_id: int, now: datetime) -> int:
-    this_week = current_week_start_london(now)
-    next_week = next_week_start_london(now)
+
+    this_week, next_week = week_bounds_naive_utc
     current_ids = set(await roster_for_week(session, team_id, this_week))
     next_ids    = set(await roster_for_week(session, team_id, next_week))
     buys  = len(next_ids - current_ids)

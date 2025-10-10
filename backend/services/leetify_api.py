@@ -132,7 +132,7 @@ def aggregate_player_stats(matches: List[Dict[str, Any]],
             continue
         rows_found += 1
 
-        # -------- Platform counter (use mapped values) --------
+        # Platform counter (use mapped values)
         cat = SOURCE_MAP.get(m.get("data_source"))
         if   cat == "faceit":   faceit_games += 1
         elif cat == "premier":  premier_games += 1
@@ -141,8 +141,8 @@ def aggregate_player_stats(matches: List[Dict[str, Any]],
         elif cat == "wingman":  other_games += 1
         else:                   other_games += 1
 
-        # -------- Win detection (fix key name) --------
-        player_team = row.get("initial_team_number")  # was 'intial_team_number'
+        #Win detection
+        player_team = row.get("initial_team_number")
         team_scores = m.get("team_scores", []) or []
         try:
             my_team_score = next(ts["score"] for ts in team_scores if ts.get("team_number") == player_team)
@@ -190,10 +190,6 @@ def aggregate_player_stats(matches: List[Dict[str, Any]],
     avg_adr     = _avg(adr_vals)
     avg_util    = _avg(util_dmg_vals)
 
-    # NOTE on types vs DB columns:
-    # - adr is Float in model  keep float
-    # - flashes/util_dmg are Integer in  model cast to int
-    # -  util_dmg is an average-per-match
 
     return {
         "avg_leetify_rating": avg_leetify,
@@ -255,5 +251,5 @@ async def leetify_profile_exists(steam64_id: str) -> bool | None:
         return True
     if r.status_code == 404:
         return False
-    # 401/403 could be privacy/other; 5xx transient
+    # 401/403 could be privacy/other
     return None

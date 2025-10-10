@@ -91,7 +91,7 @@ async def aggregate_week_from_db(
     if week_end_utc is None:
         week_end_utc = week_start_utc + timedelta(days=7)
 
-    # sanity: your DB column is naive → bounds must be naive
+    # sanity: your DB column is naive bounds must be naive
     if getattr(week_start_utc, "tzinfo", None) is not None or getattr(week_end_utc, "tzinfo", None) is not None:
         raise ValueError("Pass UTC-naive week bounds")
 
