@@ -334,9 +334,9 @@ class Teams(commands.Cog):
                 return "n/a"
 
         # Week keys (London local-naive)
-        base_start, selected_end = week_bounds_naive_utc("Europe/London")
+        base_start, _ = week_bounds_naive_utc("Europe/London")
         selected_start = base_start if week == 1 else (base_start + timedelta(days=7))
-
+        selected_end = selected_start + timedelta(days=7)
         label = "This Week" if week == 1 else "Next Week"
 
         # Tolerance
