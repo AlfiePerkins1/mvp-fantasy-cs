@@ -99,6 +99,7 @@ class Leaderboards(commands.Cog):
                         select(
                             WeeklyPoints.user_id,
                             WeeklyPoints.weekly_score,
+                            WeeklyPoints.sample_size,
                             User.discord_id,
                         )
                         .join(latest, and_(
@@ -110,7 +111,7 @@ class Leaderboards(commands.Cog):
                         .limit(limit * 2)
                     )
                     raw = (await session.execute(q)).all()
-                    rows = [(did, score) for (_uid, score, did) in raw]
+                    rows = [(did, score, (games or 0)) for (_uid, score, games, did) in raw]
 
                 else:
                     # ALL guilds: dedupe by *discord_id* (a user can exist in multiple guilds)
@@ -118,6 +119,7 @@ class Leaderboards(commands.Cog):
                         select(
                             User.discord_id.label("discord_id"),
                             WeeklyPoints.weekly_score.label("score"),
+                            func.coalesce(WeeklyPoints.sample_size, 0).label("games"),
                             func.row_number().over(
                                 partition_by=User.discord_id,
                                 order_by=WeeklyPoints.computed_at.desc(),
@@ -132,7 +134,7 @@ class Leaderboards(commands.Cog):
                     ).subquery()
 
                     q = (
-                        select(base.c.discord_id, base.c.score)
+                        select(base.c.discord_id, base.c.score, base.c.games)
                         .where(base.c.rn == 1)
                         .order_by(base.c.score.desc())
                         .limit(limit * 2)
@@ -147,11 +149,11 @@ class Leaderboards(commands.Cog):
 
         # Final safety dedupe by discord_id, then cap to limit
         seen, unique = set(), []
-        for did, score in rows:
+        for did, score, games in rows:
             if did is None or did in seen:
                 continue
             seen.add(did)
-            unique.append((did, score))
+            unique.append((did, score, int(games or 0)))
             if len(unique) >= limit:
                 break
 
@@ -161,14 +163,14 @@ class Leaderboards(commands.Cog):
             except Exception:
                 return "0.0"
 
-        header = f"{'#':<2}  {'Player':<24} {'Score':>7}"
-        sep = f"{'–' * 2}  {'–' * 24} {'–' * 7}"
+        header = f"{'#':<2}  {'Player':<24} {'Score':>7} {'Games':>5}"
+        sep = f"{'–' * 2}  {'–' * 24} {'–' * 7} {'–' * 5}"
         lines = ["```", header, sep]
 
-        for rank, (discord_id, score) in enumerate(unique, start=1):
+        for rank, (discord_id, score, games) in enumerate(unique, start=1):
             name = await _resolve_display_name_quick(guild, int(discord_id), fallback=str(discord_id))
             name = "@" + escape_mentions(name)
-            lines.append(f"{rank:<2}  {name[:24]:<24} {fmt_1dp(score):>7}")
+            lines.append(f"{rank:<2}  {name[:24]:<24} {fmt_1dp(score):>7} {games:>5}")
 
         lines.append("```")
 
