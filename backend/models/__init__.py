@@ -76,7 +76,13 @@ class TeamPlayer(Base):
     team: Mapped["Team"] = relationship(back_populates="players")
     player: Mapped["Player"] = relationship()
 
-    __table_args__ = (UniqueConstraint("team_id", "player_id", name="uq_team_player"),)
+    __table_args__ = (
+        Index(
+            "uq_team_players_active",
+            "team_id", "player_id",
+            unique=True,
+            sqlite_where=(effective_to_week.is_(None)),
+        ),)
 
 class ScoringConfig(Base):
     __tablename__ = "scoring_config"
