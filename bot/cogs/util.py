@@ -2,13 +2,19 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
+from requests.sessions import Session
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from sqlalchemy import text
+from sqlalchemy import text, or_, update, delete, select
 from backend.db import engine as async_engine
+from backend.db import SessionLocal
+from backend.models import TeamPlayer, Team, TeamWeekState
+from backend.services.market import get_or_create_team_week_state
+from bot.cogs.stats_refresh import week_bounds_naive_utc
 
 SYSTEM_AD_ID = [276641144128012289]
+INITIAL_BUDGET = 30000
 
 def system_admin_only():
     def predicate(interaction: discord.Interaction) -> bool:
@@ -163,6 +169,92 @@ class Util(commands.Cog):
 
         await interaction.followup.send("Users table rebuilt with unique(discord_id, discord_guild_id).",
                                         ephemeral=True)
+
+    @app_commands.command(
+        name="reset_teams",
+        description="Reset all teams to be empty for new season start"
+    )
+    @system_admin_only()
+    @app_commands.describe(all_guilds="If true, reset EVERY server; otherwise only this server.")
+    async def reset_teams(self, interaction: discord.Interaction, all_guilds: bool = False):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        week_start, week_end = week_bounds_naive_utc("Europe/London")  # [start, end) of THIS week
+        guild_id = interaction.guild_id
+
+        # Build a team-id subquery based on scope (i.e. all servers or just 1)
+        if all_guilds:
+            team_ids_subq = select(Team.id).subquery()
+            team_filter_for_update = True  # no-op; we'll omit WHERE
+        else:
+            team_ids_subq = select(Team.id).where(Team.guild_id == guild_id).subquery()
+            team_filter_for_update = (Team.guild_id == guild_id)
+
+        total_closed = 0
+        total_deleted_future = 0
+        teams_reset = 0
+
+        async with SessionLocal() as session:
+            async with session.begin():
+
+                # Close ongoing TeamPlayer rows at the end of this week
+                close_stmt = (
+                    update(TeamPlayer)
+                    .where(
+                        TeamPlayer.team_id.in_(select(team_ids_subq)),
+                        TeamPlayer.effective_from_week < week_end,
+                        or_(
+                            TeamPlayer.effective_to_week.is_(None),
+                            TeamPlayer.effective_to_week > week_end,
+                        ),
+                    )
+                    .values(effective_to_week=week_end)
+                )
+                res_close = await session.execute(close_stmt)
+                total_closed = res_close.rowcount or 0
+
+                # Delete future-dated team rows (queued adds for >= next week)
+                delete_stmt = (
+                    delete(TeamPlayer)
+                    .where(
+                        TeamPlayer.team_id.in_(select(team_ids_subq)),
+                        TeamPlayer.effective_from_week >= week_end,
+                    )
+                )
+                res_del = await session.execute(delete_stmt)
+                total_deleted_future = res_del.rowcount or 0
+
+                # Reset Team.build_complete
+                if all_guilds:
+                    await session.execute(update(Team).values(build_complete=False))
+                else:
+                    await session.execute(
+                        update(Team).where(team_filter_for_update).values(build_complete=False)
+                    )
+
+                # Set TeamWeekState with fresh budget/transfers
+                teams_stmt = select(Team.id, Team.guild_id)
+                if not all_guilds:
+                    teams_stmt = teams_stmt.where(Team.guild_id == guild_id)
+
+                teams = (await session.execute(teams_stmt)).all()
+
+                for team_id, g_id in teams:
+                    state = await get_or_create_team_week_state(
+                        session, guild_id=g_id, team_id=team_id, week_start=week_end
+                    )
+                    state.budget_remaining = INITIAL_BUDGET
+                    state.transfers_used = 0
+                    teams_reset += 1
+
+        scope = "ALL SERVERS" if all_guilds else "this server"
+        await interaction.followup.send(
+            f"Season reset for **{scope}**\n"
+            f"- Closed active TeamPlayer rows at GW end: **{total_closed}**\n"
+            f"- Deleted future teams rows: **{total_deleted_future}**\n"
+            f"- Set budget to (${INITIAL_BUDGET:.0f}) & reset transfers for **{teams_reset}** team(s).",
+            ephemeral=True,
+        )
 
 
 async def setup(bot: commands.Bot):

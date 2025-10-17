@@ -371,6 +371,8 @@ class Teams(commands.Cog):
                     )
                     return
                 team_id, team_name = row
+                state = await get_or_create_team_week_state(session, guild_id, team_id, selected_start)
+                bud_rem = float(state.budget_remaining)
 
                 # Roster active in the selected week: interval *overlap*
                 roster_rows = await session.execute(
@@ -391,10 +393,12 @@ class Teams(commands.Cog):
                 if not roster:
                     await interaction.followup.send(
                         f"**{escape_mentions(target_user.display_name)}**’s team **{escape_mentions(team_name)}** "
-                        f"has no players for **{label}**.",
+                        f"has no players for **{label}**.\n"
+                        f"**Budget remaining:** ${bud_rem:,.0f}",
                         allowed_mentions=NO_PINGS
                     )
                     return
+
 
                 # Map handles
                 handle_ids = [int(h) for _, h, _ in roster if str(h).isdigit()]

@@ -8,7 +8,7 @@ from backend.models import Team, TeamPlayer, Player, TeamWeekState
 from backend.services.leetify_api import current_week_start_london, next_week_start_london, current_week_start_norm, next_week_start_norm
 from bot.cogs.stats_refresh import week_bounds_naive_utc
 # config
-INITIAL_BUDGET = 25000
+INITIAL_BUDGET = 30000
 TRANSFERS_PER_WEEK = 1
 
 
