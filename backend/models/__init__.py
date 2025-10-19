@@ -212,6 +212,12 @@ class PlayerGame(Base):
 
     match_id: Mapped[int] = mapped_column(ForeignKey("matches.id"), index=True)
     match:    Mapped[Match] = relationship(backref="player_rows")
+    match_game_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+
+    # Faceit Elo stuff
+    faceit_avg_elo: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    faceit_player_elo: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
 
     # convenient copy to filter by time without join
     finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

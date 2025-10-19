@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 import os
 import pytz
 
-LEETIFY_BASE = "https://api-public.cs-prod.leetify.com/v3/profile/matches"
+LEETIFY_BASE        = "https://api-public.cs-prod.leetify.com/v3/profile/matches"
 LEETIFY_PROFILE_URL = "https://api-public.cs-prod.leetify.com/v3/profile"
 LEETIFY_MATCHES_URL = "https://api-public.cs-prod.leetify.com/v3/profile/matches"
 load_dotenv(".env")
@@ -38,7 +38,7 @@ def next_week_start_norm(now: datetime | None = None) -> datetime:
 
 
 async def fetch_recent_matches(steam_id: str, limit: int = 100) -> List[Dict[str, Any]]:
-
+    print('fetch recent matches')
     url = f"{LEETIFY_BASE}?steam64_id={steam_id}"
 
     async with httpx.AsyncClient(timeout=20) as client:
@@ -47,7 +47,10 @@ async def fetch_recent_matches(steam_id: str, limit: int = 100) -> List[Dict[str
         data = r.json()
 
         if isinstance(data, list):
+            #print(f'Data returning: {data} \n')
+            #print(f'')
             return data
+
         return []
 
 def _safe_float(x: Any) -> Optional[float]:

@@ -46,6 +46,7 @@ async def upsert_player_game(session, *, user_id: int | None, steam_id: str, mat
     my = next((t.get("score") for t in ts if t.get("team_number") == player_team), None)
     opp= next((t.get("score") for t in ts if t.get("team_number") != player_team), None)
     won = (my is not None and opp is not None and my > opp)
+    match_game_id = m.get('data_source_match_id')
 
     finished_utc = _as_utc(parse_finished_at_to_london(m["finished_at"]).astimezone(timezone.utc))
 
@@ -55,6 +56,7 @@ async def upsert_player_game(session, *, user_id: int | None, steam_id: str, mat
         match_id=match_id,
         finished_at=finished_utc,
         data_source=m["data_source"],
+        match_game_id=match_game_id,
 
         initial_team_number=row.get("initial_team_number"),
         rounds_count=row.get("rounds_count"),
