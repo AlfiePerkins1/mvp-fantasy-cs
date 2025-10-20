@@ -151,7 +151,8 @@ class Teams(commands.Cog):
                 #week keys
                 now = datetime.now(tz=timezone.utc)
                 # Using function from stats_refresh (It should be correct)
-                this_week, next_week = week_bounds_naive_utc()
+                this_week, next_week = week_bounds_naive_utc("Europe/London")
+                print(f'Line 155: this week is {this_week}, next week is {next_week}')
 
                 # State used for transfer counting (this week) and budget (next week)
                 state_this = await get_or_create_team_week_state(session, guild_id, team.id, this_week)
@@ -260,8 +261,7 @@ class Teams(commands.Cog):
 
                 # Time keys
                 now = datetime.now(tz=timezone.utc)
-                this_week = current_week_start_norm(now)
-                next_week = next_week_start_norm(now)
+                this_week, next_week = week_bounds_naive_utc("Europe/London")
 
                 # Weekly state
                 state = await get_or_create_team_week_state(session, guild_id, team.id, this_week)

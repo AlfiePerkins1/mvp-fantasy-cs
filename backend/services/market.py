@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +21,9 @@ async def get_or_create_team_week_state(
         session: AsyncSession, guild_id: int, team_id: int, week_start: datetime
 ) -> TeamWeekState:
 
+    print(f'Week start is {week_start}')
+    altered = week_start - timedelta(hours=1)
+    print(f' Altered week start is {altered}')
     row = await session.scalar(
         select(TeamWeekState).where(
             TeamWeekState.guild_id == guild_id,

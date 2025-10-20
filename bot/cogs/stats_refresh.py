@@ -77,6 +77,7 @@ def week_bounds_naive_utc(tz_name="Europe/London"):
     end_local = start_local + timedelta(days=7)
     start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)
     end_utc   = end_local.astimezone(timezone.utc).replace(tzinfo=None)
+    end_utc = end_utc - timedelta(hours=1)
     return start_utc, end_utc
 
 async def aggregate_week_from_db(
