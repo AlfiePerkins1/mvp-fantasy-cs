@@ -6,12 +6,15 @@ from requests.sessions import Session
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from sqlalchemy import text, or_, update, delete, select
+from sqlalchemy import text, or_, update, delete, select, update, cast, BigInteger
 from backend.db import engine as async_engine
 from backend.db import SessionLocal
-from backend.models import TeamPlayer, Team, TeamWeekState
+from backend.models import TeamPlayer, Team, TeamWeekState, User, PlayerGame
+from backend.services.faceit_api import fetch_faceit_guid_by_steam, fetch_faceit_match_elo_for_player
 from backend.services.market import get_or_create_team_week_state
 from bot.cogs.stats_refresh import week_bounds_naive_utc
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 SYSTEM_AD_ID = [276641144128012289]
 INITIAL_BUDGET = 30000
@@ -23,6 +26,94 @@ def system_admin_only():
             raise app_commands.CheckFailure("This command is restricted.")
         return True
     return app_commands.check(predicate)
+
+
+async def set_faceit_id_for_steam(
+    session: AsyncSession,
+    steam_id: int | str,
+    faceit_guid: str | None,
+) -> int:
+    """
+    Writes `faceit_id` for *all* User rows that have this steam_id.
+    Returns number of rows updated.
+    """
+    if not faceit_guid:
+        return 0
+
+    stmt = (
+        update(User)
+        .where(User.steam_id == int(steam_id))
+        .values(faceit_id=faceit_guid)
+    )
+    res = await session.execute(stmt)
+    return res.rowcount or 0
+
+
+async def fill_missing_faceit_elo(session: AsyncSession) -> tuple[int, int,int]:
+
+    rows = (await session.execute(
+        select(
+            PlayerGame.id,
+            PlayerGame.match_game_id,
+            PlayerGame.steam_id,
+            User.faceit_id,
+        )
+        .join(
+            User,
+            User.steam_id == cast(PlayerGame.steam_id, BigInteger),
+            isouter=True,
+        )
+        .where(
+            PlayerGame.match_game_id.is_not(None),
+            PlayerGame.faceit_player_elo.is_(None),
+            PlayerGame.data_source == "faceit",
+        )
+    )).all()
+
+    print(f"[elo-fill] candidate rows: {len(rows)}")
+
+    if not rows:
+        return(0,0,0)
+
+    by_guid = {}
+
+    skip_no_guid = 0
+
+    for pg_id, match_id, steam_id, faceit_guid in rows:
+        if not faceit_guid:
+            skip_no_guid += 1
+            continue
+        by_guid.setdefault(faceit_guid, []).append((pg_id, match_id, steam_id))
+
+    updated, not_found = 0,0
+
+    for guid, items in by_guid.items():
+
+        print(f"[elo-fill] querying Faceit stats for guid={guid} (items={len(items)})")
+
+        docs = await fetch_faceit_match_elo_for_player(guid)
+        elo_by_match = {}
+        for d in docs or []:
+            mid = d.get("matchId")
+            elo = d.get("elo")
+            if mid and elo is not None:
+                elo_by_match[str(mid).strip()] = int(elo)
+
+        for pg_id, match_id, _steam in items:
+            key = str(match_id or "").strip()
+            elo = elo_by_match.get(key)
+            if elo is None:
+                not_found += 1
+                continue
+            await session.execute(
+                update(PlayerGame)
+                .where(PlayerGame.id == pg_id)
+                .values(faceit_player_elo=int(elo))
+            )
+            updated += 1
+
+    await session.flush()
+    return (updated, skip_no_guid, not_found)
 
 def _is_admin_only(cmd: app_commands.Command | app_commands.Group) -> bool:
     dp = getattr(cmd, "default_permissions", None)
@@ -256,6 +347,67 @@ class Util(commands.Cog):
             ephemeral=True,
         )
 
+    @app_commands.command(name="update_faceit_guid", description="Update user table with faceit guid's")
+    @app_commands.describe(all_guilds="If true, process users from EVERY guild")
+    @system_admin_only()
+    async def update_faceit_guid(self, interaction: discord.Interaction, all_guilds: bool = False):
+        guild_id = interaction.guild_id
+        if not guild_id and not all_guilds:
+            await interaction.response.send_message("Use this in a server (or pass all_guilds=True).", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        updated, missing, errors = 0, 0, 0
+
+        async with SessionLocal() as session:
+            # pick users with steam_id and missing faceit_id
+            q = select(User.steam_id).where(User.steam_id.is_not(None), User.faceit_id.is_(None))
+            if not all_guilds:
+                q = q.where(User.discord_guild_id == guild_id)
+
+            steam_ids = [int(s) for (s,) in (await session.execute(q)).all()]
+            # de-dupe per steam_id to avoid double lookups across guild copies
+            for steam in sorted(set(steam_ids)):
+                try:
+                    guid = await fetch_faceit_guid_by_steam(steam)
+                    if guid:
+                        n = await set_faceit_id_for_steam(session, steam_id=steam, faceit_guid=guid)
+                        updated += n
+                    else:
+                        missing += 1
+                except Exception as e:
+                    errors += 1
+                    # optional: log e
+            await session.commit()
+
+        scope = "all guilds" if all_guilds else "this server"
+        await interaction.followup.send(
+            f"Faceit GUID linking complete for {scope}.\n"
+            f"Updated rows: **{updated}** • Not found: **{missing}** • Errors: **{errors}**",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="fill_faceit_elo",
+        description="Backfill Faceit per-match ELO into player_games where missing"
+    )
+    @system_admin_only()
+    async def fill_faceit_elos_cmd(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        async with SessionLocal() as session:
+            async with session.begin():
+                updated, skipped, not_found = await fill_missing_faceit_elo(session)
+            await session.commit()
+
+        await interaction.followup.send(
+            f"Faceit ELO backfill complete.\n"
+            f"Updated rows: **{updated}**\n"
+            f"Skipped (no faceit_id): **{skipped}**\n"
+            f"No ELO found for matchId: **{not_found}**",
+            ephemeral=True,
+        )
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Util(bot))
