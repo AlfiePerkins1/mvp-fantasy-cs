@@ -10,7 +10,8 @@ from sqlalchemy import text, or_, update, delete, select, update, cast, BigInteg
 from backend.db import engine as async_engine
 from backend.db import SessionLocal
 from backend.models import TeamPlayer, Team, TeamWeekState, User, PlayerGame
-from backend.services.faceit_api import fetch_faceit_guid_by_steam, fetch_faceit_match_elo_for_player
+from backend.services.faceit_api import fetch_faceit_guid_by_steam, fetch_faceit_match_elo_for_player, \
+    fetch_faceit_team_avg_elo
 from backend.services.market import get_or_create_team_week_state
 from bot.cogs.stats_refresh import week_bounds_naive_utc
 
@@ -114,6 +115,50 @@ async def fill_missing_faceit_elo(session: AsyncSession) -> tuple[int, int,int]:
 
     await session.flush()
     return (updated, skip_no_guid, not_found)
+
+
+async def fill_faceit_avg_elo(session) -> tuple[int, int]:
+    """
+    Finds Faceit matches with a match_game_id and missing faceit_avg_elo,
+    fetches team averages from the v4 match endpoint, and updates all rows for that match.
+    Returns (updated_matches, skipped_matches).
+    """
+    # unique match ids to avoid fetching 10x
+    match_ids = (await session.execute(
+        select(PlayerGame.match_game_id)
+        .where(
+            PlayerGame.data_source == "faceit",
+            PlayerGame.match_game_id.isnot(None),
+            PlayerGame.faceit_avg_elo.is_(None),
+        )
+        .group_by(PlayerGame.match_game_id)
+    )).scalars().all()
+
+    updated = 0
+    skipped = 0
+
+    for mid in match_ids:
+        try:
+            t1, t2, lobby = await fetch_faceit_team_avg_elo(mid)
+            if lobby is None:
+                skipped += 1
+                continue
+
+            # Store only the lobby average:
+            await session.execute(
+                update(PlayerGame)
+                .where(PlayerGame.match_game_id == mid)
+                .values(faceit_avg_elo=int(lobby))
+            )
+
+            updated += 1
+        except Exception as e:
+            # log and continue
+            print(f"[faceit-backfill] match {mid} failed: {e}")
+            skipped += 1
+
+    await session.flush()
+    return updated, skipped
 
 def _is_admin_only(cmd: app_commands.Command | app_commands.Group) -> bool:
     dp = getattr(cmd, "default_permissions", None)
@@ -393,7 +438,7 @@ class Util(commands.Cog):
         description="Backfill Faceit per-match ELO into player_games where missing"
     )
     @system_admin_only()
-    async def fill_faceit_elos_cmd(self, interaction: discord.Interaction):
+    async def fill_faceit_elo_cmd(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         async with SessionLocal() as session:
@@ -407,6 +452,26 @@ class Util(commands.Cog):
             f"Skipped (no faceit_id): **{skipped}**\n"
             f"No ELO found for matchId: **{not_found}**",
             ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="fill_faceit_avg_elo",
+        description="Backfill Faceit team & lobby average ELO per match where missing"
+    )
+    @system_admin_only()
+    async def fill_faceit_avg_elo_cmd(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        async with SessionLocal() as session:
+            async with session.begin():
+                updated, skipped = await fill_faceit_avg_elo(session)
+            await session.commit()
+
+        await interaction.followup.send(
+            f"Faceit lobby ELO backfill complete.\n"
+            f"Updated matches: **{updated}**\n"
+            f"Skipped: **{skipped}**",
+            ephemeral=True
         )
 
 async def setup(bot: commands.Bot):

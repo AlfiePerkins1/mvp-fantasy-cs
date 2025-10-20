@@ -9,6 +9,7 @@ load_dotenv(".env")
 
 BASE_URL = "https://open.faceit.com/data/v4"
 FACEIT_ELO_MATCH_URL = ("https://api.faceit.com/stats/v1/stats/time/users/{player}/games/cs2")
+FACEIT_V4_MATCH = "https://open.faceit.com/data/v4/matches/{mid}"
 
 API_KEY = os.getenv("FACEIT_API_KEY")
 
@@ -98,3 +99,39 @@ async def fetch_faceit_match_elo_for_player(
 
 
         return []
+
+
+async def fetch_faceit_team_avg_elo(match_id: str) -> tuple[int | None, int | None, int | None]:
+    """
+    Returns (team1_avg, team2_avg, lobby_avg) from the v4 match payload.
+    Expects rating under teams.factionX.stats.rating
+    Someone will have to tell me why faceit calls them factions and not teams lol
+    """
+    async with httpx.AsyncClient(timeout=20) as client:
+        r = await client.get(FACEIT_V4_MATCH.format(mid=match_id), headers=FACEIT_HEADERS)
+        r.raise_for_status()
+        m = r.json()
+
+    def read_avg(faction_key: str) -> int | None:
+        stats = ((m.get("teams", {}) or {}).get(faction_key, {}) or {}).get("stats", {}) or {}
+        val = stats.get("rating")
+        if val is None:
+            return None
+        try:
+            return int(val)
+        except Exception:
+            try:
+                return int(float(val))
+            except Exception:
+                return None
+
+    t1 = read_avg("faction1")
+    t2 = read_avg("faction2")
+    lobby = None
+    if t1 is not None and t2 is not None:
+        lobby = round((t1 + t2) / 2)
+    elif t1 is not None:
+        lobby = t1
+    elif t2 is not None:
+        lobby = t2
+    return t1, t2, lobby
