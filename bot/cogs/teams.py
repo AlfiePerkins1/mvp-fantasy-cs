@@ -11,6 +11,9 @@ from sqlalchemy.exc import IntegrityError
 from discord.utils import escape_mentions
 from datetime import timedelta, timezone, datetime
 from zoneinfo import ZoneInfo
+
+from sqlalchemy.sql.functions import user
+
 from backend.db import SessionLocal
 from backend.services.market import already_on_team, roster_count, get_or_create_team_week_state, \
     get_global_player_price, TRANSFERS_PER_WEEK, buy_player, sell_player, team_has_active_this_week, roster_for_week
@@ -621,8 +624,127 @@ class Teams(commands.Cog):
 
         await interaction.response.send_message(f"Team renamed to **{name}**.")
 
+    @team.command(name='transfers', description="View upcoming transfers")
+    async def view_transfers(self, interaction: discord.Interaction):
 
+        guild = interaction.guild
+        guild_id = interaction.guild_id
 
+        await interaction.response.defer(ephemeral=False, thinking=True)
+
+        if not guild_id:
+            await interaction.response.send_message("Use this in a server (not DMs).", ephemeral=True)
+            return
+        target_user = interaction.user
+
+        current_date = now = datetime.now(timezone.utc)
+        base_start, _ = week_bounds_naive_utc("Europe/London")
+        selected_start = base_start
+        selected_end = selected_start + timedelta(days=7)
+
+        async with SessionLocal() as session:
+            async with session.begin():
+
+                target_db_user = await session.scalar(
+                    select(User).where(
+                        User.discord_id == int(target_user.id),
+                        User.discord_guild_id == guild_id,
+                    )
+                )
+                if not target_db_user:
+                    await interaction.followup.send(
+                        f'**{escape_mentions(target_user.display_name)}** has no account in this server.',
+                        allowed_mentions=NO_PINGS
+                    )
+                    return
+
+                team_row = await session.execute(
+                    select(Team.id, Team.name)
+                    .where(Team.owner_id == target_db_user.id, Team.guild_id == guild_id)
+                )
+                row = team_row.first()
+                if not row:
+                    await interaction.followup.send(
+                        f"**{escape_mentions(target_user.display_name)}** has no team in this server.",
+                        allowed_mentions=NO_PINGS
+                    )
+                    return
+
+                team_id, team_name = row
+                state = await get_or_create_team_week_state(session, guild_id, team_id, selected_start)
+                bud_rem = float(state.budget_remaining)
+
+                transfer_rows_in = await session.execute(
+                    select(
+                        Player.id,
+                        Player.handle,
+                        TeamPlayer.role,
+                        TeamPlayer.effective_from_week.label("start_at"),
+                        Player.price,
+                    )
+                    .join(TeamPlayer, TeamPlayer.player_id == Player.id)
+                    .where(
+                        TeamPlayer.team_id == team_id,
+                        TeamPlayer.effective_from_week > current_date,
+                    ).order_by(Player.handle.asc())
+                )
+                transfers_in = transfer_rows_in.all()
+
+                transfer_rows_out = await session.execute(
+                    select(
+                        Player.id,
+                        Player.handle,
+                        TeamPlayer.role,
+                        TeamPlayer.effective_to_week.label("leave_at"),
+                        Player.price,
+                    )
+                    .join(TeamPlayer, TeamPlayer.player_id == Player.id)
+                    .where(
+                        TeamPlayer.team_id == team_id,
+                        TeamPlayer.effective_to_week > current_date,
+                    ).order_by(Player.handle.asc())
+                )
+                transfers_out = transfer_rows_out.all()
+
+        def _name_from_handle(h: str) -> str:
+            return f"<@{h}>" if str(h).isdigit() else f"{h}"
+
+        def _fmt_date(d) -> str:
+            try:
+                return d.strftime("%d-%b")
+            except Exception:
+                return "TBD"
+
+        def _fmt_money(v) -> str:
+            try:
+                return f"{int(v):,}"
+            except Exception:
+                return "-"
+
+        lines_in = []
+        for _pid, handle, _role, start_at, price in transfers_in:
+            lines_in.append(f"{_name_from_handle(handle)} | {_fmt_date(start_at)} | - {_fmt_money(price)}")
+
+        lines_out = []
+        for _pid, handle, _role, leave_at, price in transfers_out:
+            lines_out.append(f"{_name_from_handle(handle)} | {_fmt_date(leave_at)} | + {_fmt_money(price)}")
+
+        # Fallbacks if empty
+        block_in = "\n".join(lines_in) if lines_in else "None"
+        block_out = "\n".join(lines_out) if lines_out else "    None    "
+
+        budget_txt = f"${int(bud_rem):,}"
+
+        embed = discord.Embed(
+            title=f"Transfers — {team_name}",
+            description="Queued changes for the upcoming gameweek",
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(name="Transfers In", value="User    | Start Date | - Cost\n" + block_in, inline=True)
+        embed.add_field(name="Transfers Out", value="User | Leaving Date | + Cost\n" + block_out, inline=True)
+        embed.add_field(name="Overall Budget Remaining", value=f"**{budget_txt}**", inline=False)
+
+        await interaction.followup.send(embed=embed, allowed_mentions=NO_PINGS)
 
 
 
