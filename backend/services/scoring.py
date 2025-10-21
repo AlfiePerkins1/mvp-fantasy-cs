@@ -67,7 +67,7 @@ def compute_weekly_from_playerstats(ps, *, alpha: float = 10.0, k: float = 0.60,
 
 
 def make_breakdown(ps, *, alpha: float = 10.0, k: float = 0.60, cap: float = 1.15, w=None):
-    w = w or {"rating": 10.0, "adr": 0.1, "trades": 2.0, "entries": 3.0, "flashes": 1.0, "util": 0.05}
+    w = w or {"rating": 0.0, "adr": 0.0, "trades": 0.0, "entries": 0.0, "flashes": 0.0, "util": 0.00}
 
     games_total = _i(ps.sample_size) or (
             _i(ps.premier_games) + _i(ps.faceit_games) + _i(ps.renown_games) + _i(ps.mm_games)
@@ -90,9 +90,9 @@ def make_breakdown(ps, *, alpha: float = 10.0, k: float = 0.60, cap: float = 1.1
 
     base_avg = pts_rating + pts_adr + pts_trades + pts_entries + pts_flashes + pts_util
 
-    n_p = _i(ps.premier_games);
-    n_f = _i(ps.faceit_games);
-    n_r = _i(ps.renown_games);
+    n_p = _i(ps.premier_games)
+    n_f = _i(ps.faceit_games)
+    n_r = _i(ps.renown_games)
     n_m = _i(ps.mm_games)
     denom = max(1, n_p + n_f + n_r + n_m)
     avg_mult = (MATCH_MULT["premier"] * n_p + MATCH_MULT["faceit"] * n_f + MATCH_MULT["renown"] * n_r + MATCH_MULT[

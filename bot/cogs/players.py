@@ -13,7 +13,7 @@ import matplotlib.dates as mdates
 
 from backend.db import SessionLocal
 from bot.cogs.leaderboard import NO_PINGS
-from bot.cogs.stats_refresh import week_bounds_naive_utc
+from bot.cogs.stats_refresh import week_bounds_naive_utc, aggregate_week_from_db
 
 matplotlib.use("Agg")
 from sqlalchemy import select, func, and_
@@ -125,6 +125,7 @@ class Players(commands.Cog):
     @app_commands.describe(member="Target user (@mention)")
     async def points_breakdown(self, interaction: discord.Interaction, member: discord.User):
         guild_id = interaction.guild_id
+        week_key, week_end = week_bounds_naive_utc("Europe/London")
         if not guild_id:
             await interaction.response.send_message("Use this command in a server")
             return
@@ -139,38 +140,59 @@ class Players(commands.Cog):
                         User.discord_guild_id == guild_id,
                     )
                 )
+                steam = await session.scalar(
+                    select(User.steam_id).where(
+                        User.discord_id == int(member.id),
+                        User.discord_guild_id == guild_id,
+                    )
+                )
+
                 if not user_id:
                     await interaction.followup.send(f'{member.mention} is not registered in this server')
                     return
 
-                stats_row = await session.execute(
+                # Raw stats
+
+                breakdown = await aggregate_week_from_db(
+                    session,
+                    steam_id=int(steam),
+                    week_start_utc=week_key,
+                    week_end_utc=week_end,
+                )
+
+                # Actual stats calculation now:
+                # Games
+                sample = int(breakdown.get("sample_size") or 0)
+
+                # POINTS
+                points_row = await session.execute(
                     select(
-                        PlayerStats.avg_leetify_rating,
-                        PlayerStats.sample_size,
-                        PlayerStats.wins,
-                        PlayerStats.ct_rating,
-                        PlayerStats.t_rating,
-                        PlayerStats.adr,
-                        PlayerStats.flashes,
-                        PlayerStats.util_dmg,
-                        PlayerStats.faceit_games,
-                        PlayerStats.premier_games,
-                        PlayerStats.renown_games,
-                        PlayerStats.mm_games,
-                        PlayerStats.other_games,
+                        WeeklyPoints.pts_rating,
+                        WeeklyPoints.sample_size,
+                        WeeklyPoints.wins,
+                        WeeklyPoints.pts_adr,
+                        WeeklyPoints.pts_trades,
+                        WeeklyPoints.pts_flashes,
+                        WeeklyPoints.pts_util,
+                        WeeklyPoints.faceit_games,
+                        WeeklyPoints.premier_games,
+                        WeeklyPoints.renown_games,
+                        WeeklyPoints.mm_games,
+                        WeeklyPoints.wr_eff
                     ).where(
-                        PlayerStats.guild_id == guild_id,
-                        PlayerStats.user_id == user_id,
+                        WeeklyPoints.guild_id == guild_id,
+                        WeeklyPoints.user_id == user_id,
+                        WeeklyPoints.week_start == week_key
                     )
                 )
-                s = stats_row.one_or_none()
+                s = points_row.one_or_none()
                 if not s:
                     await interaction.followup.send(f"No weekly stats found for {member.mention} in this server.")
                     return
                 (
-                    avg_rating, sample, wins,
-                    ct_rating, t_rating, adr, flashes, util_dmg,
-                    faceit_g, premier_g, renown_g, mm_g, other_g
+                    pts_rating, sample, wins,
+                    pts_adr, pts_trades, pts_flashes, pts_util, faceit_games,
+                    premier_games, renown_games, mm_games, wr_eff
                 ) = s
 
                 def f1(x):
@@ -185,7 +207,12 @@ class Players(commands.Cog):
                     try: return f"{int(x)}"
                     except: return "0"
 
-                week_key, _ = week_bounds_naive_utc("Europe/London")
+                def f_pct(x) -> str:
+                    try: return f"{float(x) * 100:.0f}%"
+                    except Exception:
+                        return "—"
+
+
                 latest_q = (
                     select(WeeklyPoints.weekly_score)
                     .where(
@@ -199,24 +226,38 @@ class Players(commands.Cog):
                     .limit(1)
                 )
                 weekly_total = await session.scalar(latest_q)
+                other_games = sample - faceit_games - premier_games - renown_games - mm_games
 
-                left = [
-                    f"**Avg Leetify**: {f2(avg_rating)}",
-                    f"**Games**: {fint(sample)} ",
-                    f"**Wins**: {fint(wins)}",
-                    f"**CT rating**: {f2(ct_rating)}",
-                    f"**T rating**: {f2(t_rating)}",
-                    f"**ADR**: {f1(adr)}",
-                    f"**Flashes**: {f1(flashes)}",
-                    f"**Util dmg**: {f1(util_dmg)}",
+                points_lines = [
+                    f"**Avg Leetify (pts)**: {f2(pts_rating)}",
+                    f"**ADR (pts)**: {f1(pts_adr)}",
+                    f"**Flashes (pts)**: {f1(pts_flashes)}",
+                    f"**Util dmg (pts)**: {f1(pts_util)}",
+                    f"**WR eff**: {f2(wr_eff)}"
                 ]
 
-                games = [
-                    f"**Faceit**: {fint(faceit_g)}",
-                    f"**Premier**: {fint(premier_g)}",
-                    f"**Renown**: {fint(renown_g)}",
-                    f"**Matchmaking**: {fint(mm_g)}",
-                    f"**Other**: {fint(other_g)}",
+                # Raw performance lines (true values)
+                raw_lines = [
+                    f"**Avg Leetify**: {f2(breakdown.get('avg_leetify_rating'))}",
+                    f"**CT/T rating**: {f2(breakdown.get('ct_rating'))} / {f2(breakdown.get('t_rating'))}",
+                    f"**ADR**: {f1(breakdown.get('adr'))}",
+                    f"**Entries**: {f1(breakdown.get('entries', 0.0))}",
+                    f"**Flashes**: {f1(breakdown.get('flashes'))}",
+                    f"**Util dmg**: {f1(breakdown.get('util_dmg'))}",
+                    f"**Trade kills**: {fint(breakdown.get('trade_kills'))}",
+                ]
+
+                # Game-type counts (raw)
+                other_games = max(0, int(sample or 0) - int(faceit_games or 0) - int(premier_games or 0)
+                                  - int(renown_games or 0) - int(mm_games or 0))
+                games_lines = [
+                    f"**Games**: {fint(sample)}  (_WR: {f_pct(wins/sample)}_)",
+                    f"**Wins**: {fint(wins)}",
+                    f"**Faceit**: {fint(faceit_games)}",
+                    f"**Premier**: {fint(premier_games)}",
+                    f"**Renown**: {fint(renown_games)}",
+                    f"**Matchmaking**: {fint(mm_games)}",
+                    f"**Other**: {fint(other_games)}",
                 ]
 
                 embed = discord.Embed(
@@ -226,12 +267,20 @@ class Players(commands.Cog):
                 )
 
                 if weekly_total is not None:
-                    embed.add_field(name="Fantasy points (this week)", value=f"**{float(weekly_total):.1f}**",
-                                    inline=False)
+                    embed.add_field(
+                        name="Fantasy points (this week)",
+                        value=f"**{float(weekly_total):.1f}**",
+                        inline=False
+                    )
 
-                embed.add_field(name="__**Performance**__", value="\n".join(left), inline=True)
-                embed.add_field(name="__**Game Type**__", value="\n".join(games), inline=True)
+                # Two side-by-side columns: points vs stats
+                embed.add_field(name="__**Points**__", value="\n".join(points_lines), inline=True)
+                embed.add_field(name="__**Stats**__", value="\n".join(raw_lines), inline=True)
 
+                # Third column: queue type counts + WR
+                embed.add_field(name="__**Queue Type**__", value="\n".join(games_lines), inline=True)
+
+                embed.set_footer(text="Points vs. stats")
                 await interaction.followup.send(embed=embed, allowed_mentions=NO_PINGS)
 
 

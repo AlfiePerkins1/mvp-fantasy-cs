@@ -255,14 +255,37 @@ Weights and Gamma will be tuned throughout the testing and use of the bot to mak
 
 # Example Images
 
-Below shows the `/pricing prices` command and lists player prices in order of most expensive to cheapest
 
-![Player Pricing display](images/Player_Prices.PNG "Player Pricing display")
+### /Pricing show
+Displays prices of every registered user in a server Descending.
 
-Below shows the `/team show` command with information about this weeks games. The role column is coming soon and will feature multipliers for different stats.
+![Player Pricing display](images/commands/pricing_show.png "Player Pricing display")
 
-![Team display](images/team_display.PNG "Team display")
+### /Team show
 
+Displays players team for either this week or the next. (SS shows next week)
+
+![Team display](images/commands/team_show.png "Team display")
+
+### /Player graph
+
+Shows the users points history per gameweek
+
+![Player Graph](images/commands/player_graph.png "Player Graph")
+
+
+### /Player point_breakdown
+
+Shows what is effecting a users points, in terms of broken down points and raw stats.
+
+![Player Graph](images/commands/point_breakdown.png "Point breakdown")
+
+
+### /Team transfers
+
+Shows upcoming transfers queued for your team as well as the cost(or revenue if selling)
+
+![Player Graph](images/commands/team_transfers.png "Team Transfers")
 
 # F.A.Qs
 
@@ -284,8 +307,11 @@ Until I sort out task scheduling to automatically collect game data daily. Comma
 1. /stats backfill_games 
    - This collects all games played by users in the server 
 2. /stats update_all
-    - This uses the backfilled games are collates all the stats and converts to weekly points
-
+   - This uses the backfilled games are collates all the stats and converts to weekly points
+3. /stats fill_faceit_elo 
+   - Searches recent games which were on faceit and fills in the players faceit elo for that match
+4. /fill_faceit_avg_elo
+   - Searches recent faceit matches and gets the average lobby elo for the game
 
 *I recommend running these commands once a day, however they **MUST** be run as close to the week reset as possible to capture all games.*
 
