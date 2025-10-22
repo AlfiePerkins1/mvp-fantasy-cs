@@ -112,8 +112,8 @@ async def aggregate_week_from_db(
             func.sum(case((PG.won.is_(True), 1), else_=0)).label("wins"),
 
             # Buckets — EXACT mapping
-            func.sum(case((PG.data_source == "matchmaking_competitive", 1), else_=0)).label("premier_games"),
-            func.sum(case((PG.data_source == "matchmaking", 1), else_=0)).label("mm_games"),
+            func.sum(case((PG.data_source == "matchmaking", 1), else_=0)).label("premier_games"),
+            func.sum(case((PG.data_source == "matchmaking_competitive", 1), else_=0)).label("mm_games"),
             func.sum(case((PG.data_source == "faceit", 1), else_=0)).label("faceit_games"),
             func.sum(case((PG.data_source == "renown", 1), else_=0)).label("renown_games"),
         )
